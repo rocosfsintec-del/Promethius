@@ -116,11 +116,9 @@ export default function ChatPanel({
         setConversationId(r.data.conversation_id);
         refreshConversations();
       }
-      setMessages((m) => [...m, { id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text" }]);
+      setMessages((m) => [...m, { id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text", pushProposal: r.data.push_proposal || null }]);
       if (r.data.push_proposal) {
-        setPushProposal(r.data.push_proposal);
-        setShowPush(true);
-        toast.info("Promethius prepared a push — review & approve it");
+        toast.info("Promethius prepared a change — tap “Review & Push” to approve");
       }
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Promethius could not respond");
@@ -256,13 +254,24 @@ export default function ChatPanel({
                     ) : (
                       <>
                         <Markdown>{m.content}</Markdown>
-                        <button
-                          data-testid="speak-button"
-                          onClick={() => speak(m.content)}
-                          className="mt-2 text-xs text-zinc-600 hover:text-orange-400 font-mono uppercase tracking-wider transition-colors"
-                        >
-                          ▶ Speak
-                        </button>
+                        <div className="mt-2 flex items-center gap-3">
+                          <button
+                            data-testid="speak-button"
+                            onClick={() => speak(m.content)}
+                            className="text-xs text-zinc-600 hover:text-orange-400 font-mono uppercase tracking-wider transition-colors"
+                          >
+                            ▶ Speak
+                          </button>
+                          {m.pushProposal && (
+                            <button
+                              data-testid="review-push-button"
+                              onClick={() => { setPushProposal(m.pushProposal); setShowPush(true); }}
+                              className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20 hover:bg-orange-500/20 transition-colors"
+                            >
+                              <Github size={12} /> Review &amp; Push
+                            </button>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>

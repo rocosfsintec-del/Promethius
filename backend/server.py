@@ -864,14 +864,18 @@ _GH_TOOLS_ANTHROPIC = [
 
 GH_TOOL_GUIDANCE = (
     "\n\n=== GITHUB ABILITIES ===\n"
-    "You can actually act on GitHub using these tools: list_github_files, read_github_file, "
+    "You can act on GitHub using these tools: list_github_files, read_github_file, "
     "propose_github_push, and set_self_repo. When the user asks you to pull, open, read, review, analyze, "
     "or change a GitHub repo, CALL these tools with the repo URL — do not say you lack access or ask them "
-    "to paste code. For any change/commit, call propose_github_push; it opens a review dialog for the user "
-    "to approve, so never claim something was pushed until they approve. When you propose a push that opens "
-    "a pull request, a clear PR summary is generated automatically. If the user tells you which repo is "
-    "YOUR OWN code, call set_self_repo to remember it. If a tool says GitHub is not connected, tell the user "
-    "to connect their token via the GitHub button in the chat toolbar.\n"
+    "to paste code.\n"
+    "IMPORTANT: Only call propose_github_push when the user's CURRENT message explicitly asks you to commit, "
+    "push, save, apply, or write changes to a repo. For questions, reads, reviews, greetings, casual chat, or "
+    "any message that does not clearly request a write, DO NOT call propose_github_push. Never re-propose a "
+    "push on a follow-up message unless the user asks again. propose_github_push opens a review dialog for the "
+    "user to approve, so never claim something was pushed until they approve. When a push opens a pull request, "
+    "a clear PR summary is generated automatically. If the user tells you which repo is YOUR OWN code, call "
+    "set_self_repo. If a tool says GitHub is not connected, tell the user to connect their token via the GitHub "
+    "button in the chat toolbar.\n"
     "=== END GITHUB ABILITIES ===\n"
 )
 
@@ -925,7 +929,27 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
 
 @api_router.get("/models")
 async def models(user=Depends(get_current_user)):
-    return PROVIDERS
+    """Return providers/models. The Ollama list is merged with whatever is actually
+    installed locally (so custom / LoRA-merged models show up automatically)."""
+    result = {k: list(v) for k, v in PROVIDERS.items()}
+    try:
+        tags_url = OLLAMA_BASE_URL.rstrip("/")
+        if tags_url.endswith("/v1"):
+            tags_url = tags_url[:-3]
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(tags_url.rstrip("/") + "/api/tags")
+        if r.status_code == 200:
+            installed = [m["name"] for m in r.json().get("models", []) if m.get("name")]
+            # keep curated defaults first, then any extra installed models (incl. :latest cleaned)
+            seen = set(result["ollama"])
+            for name in installed:
+                short = name[:-7] if name.endswith(":latest") else name
+                if short not in seen:
+                    result["ollama"].append(short)
+                    seen.add(short)
+    except Exception as e:
+        logger.info(f"ollama tags unavailable: {e}")
+    return result
 
 
 @api_router.post("/chat")
