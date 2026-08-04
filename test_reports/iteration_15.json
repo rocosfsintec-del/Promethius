@@ -1,0 +1,27 @@
+{
+  "summary": "Passkey (WebAuthn) registration and login verified end-to-end on the preview URL using a CDP Virtual Authenticator (ctap2, internal, resident key, user verified). Both /api/webauthn/register/options + /register/verify and /api/webauthn/login/options + /login/verify returned 200, a JWT was persisted to localStorage 'promethius_token' (len=165 for both), and the app navigated from /login to '/' after each flow. No 'Unexpected client data origin' error occurred — the origin allowlist fix (WEBAUTHN_EXPECTED_ORIGIN now a list including the preview URL) is working. The user-reported bug is fixed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is very large (>1400 lines shown, likely more). Consider splitting into modules (auth/webauthn, chat, files, github, tools) for maintainability.",
+    "webauthn_login_verify looks up the credential by req.credential.get('id') which is the client-side base64url id — this is compared against stored credential_id_b64. Ensure both use the same URL-safe base64 (no padding) format. Currently working, but a helper to normalize would harden it.",
+    "WEBAUTHN_EXPECTED_ORIGIN includes localhost defaults even in cloud preview. Harmless (webauthn library just checks membership), but for production hardening consider gating base localhost origins behind a DEV flag."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Test user created dynamically: qa_passkey_1785837054@example.com (passkey stored in ephemeral virtual authenticator; not reusable across sessions).",
+  "seed_data_creation": "One user + one passkey credential created in DB during this test (email above).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "WebAuthn passkey flow works on the preview URL. To retest, you MUST inject a Playwright/CDP Virtual Authenticator BEFORE navigating: cdp.send('WebAuthn.enable') then 'WebAuthn.addVirtualAuthenticator' with {protocol:'ctap2', transport:'internal', hasResidentKey:true, hasUserVerification:true, isUserVerified:true, automaticPresenceSimulation:true}. Reuse the SAME page (same authenticator) for register→login. Use a fresh email per run because credentials in the DB persist. Backend .env keys WEBAUTHN_RP_ID and WEBAUTHN_EXPECTED_ORIGIN are set to the preview host.",
+  "rca of the issue": "Root cause was that backend passed a single string to py_webauthn's expected_origin, so only one origin was accepted; the browser sent the preview URL as clientDataJSON.origin which did not match. Fix: WEBAUTHN_EXPECTED_ORIGIN is now built as a de-duplicated list ([localhost:3000, localhost:8001, 127.0.0.1 variants, plus each origin in the WEBAUTHN_EXPECTED_ORIGIN env var]). py_webauthn 3.x accepts a list and matches if origin is a member. Verified in preview: no 'Unexpected client data origin' error appeared and both verify endpoints returned 200 + token."
+}
