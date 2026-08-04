@@ -760,12 +760,20 @@ async def _repo_default_branch(token, owner, repo):
     return info.json().get("default_branch", "main")
 
 
+async def _remember_repo(user_id, owner, repo):
+    try:
+        await db.github_config.update_one({"user_id": user_id}, {"$set": {"last_repo": f"{owner}/{repo}"}})
+    except Exception:
+        pass
+
+
 async def _tool_list_files(user_id, repo_url, branch=None):
     token = await _gh_token(user_id)
     owner, repo = _parse_repo_url(repo_url)
     branch = branch or await _repo_default_branch(token, owner, repo)
     tree = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/trees/{branch}", params={"recursive": "1"})
     paths = [t["path"] for t in tree.json().get("tree", []) if t.get("type") == "blob"]
+    await _remember_repo(user_id, owner, repo)
     return {"repo": f"{owner}/{repo}", "branch": branch, "file_count": len(paths), "files": paths[:400]}
 
 
@@ -782,6 +790,7 @@ async def _tool_read_file(user_id, repo_url, path, branch=None):
         text = raw.decode("utf-8")
     except Exception:
         return {"error": "Binary file — cannot read as text."}
+    await _remember_repo(user_id, owner, repo)
     return {"repo": f"{owner}/{repo}", "branch": branch, "path": path, "content": text[:14000]}
 
 
@@ -807,9 +816,16 @@ async def _exec_gh_tool(name, args, user_id):
                 return {"error": "No files provided to push."}
             token = await _gh_token(user_id)
             prop["default_branch"] = await _repo_default_branch(token, prop["owner"], prop["repo"])
+            await _remember_repo(user_id, prop["owner"], prop["repo"])
             return {"status": "proposal_ready",
                     "note": "A review dialog will open for the user to approve. Do NOT claim it is pushed yet.",
                     "proposal": prop}
+        if name == "set_self_repo":
+            owner, repo = _parse_repo_url(args.get("repo_url"))
+            await db.github_config.update_one({"user_id": user_id},
+                                              {"$set": {"self_repo": f"{owner}/{repo}"}})
+            return {"status": "ok", "self_repo": f"{owner}/{repo}",
+                    "note": "Saved. From now on 'your own code'/'update yourself' refers to this repo."}
     except HTTPException as e:
         return {"error": str(e.detail)}
     except Exception as e:
@@ -836,6 +852,9 @@ _GH_TOOLS_OPENAI = [
             "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
             "create_branch": {"type": "boolean"}, "open_pr": {"type": "boolean"}},
             "required": ["repo_url", "message", "files"]}}},
+    {"type": "function", "function": {
+        "name": "set_self_repo", "description": "Record which GitHub repo IS Promethius's own source code. Call this when the user tells you your repo, so later 'update yourself'/'your own code' works without a URL.",
+        "parameters": {"type": "object", "properties": {"repo_url": {"type": "string"}}, "required": ["repo_url"]}}},
 ]
 
 _GH_TOOLS_ANTHROPIC = [
@@ -845,12 +864,14 @@ _GH_TOOLS_ANTHROPIC = [
 
 GH_TOOL_GUIDANCE = (
     "\n\n=== GITHUB ABILITIES ===\n"
-    "You can actually act on GitHub using these tools: list_github_files, read_github_file, and "
-    "propose_github_push. When the user asks you to pull, open, read, review, analyze, or change a GitHub "
-    "repo, CALL these tools with the repo URL they gave you — do not say you lack access or ask them to paste "
-    "code. For any change/commit, call propose_github_push; it opens a review dialog for the user to approve, "
-    "so never claim something was pushed until they approve. If a tool returns an error that GitHub is not "
-    "connected, tell the user to connect their token via the GitHub button in the chat toolbar.\n"
+    "You can actually act on GitHub using these tools: list_github_files, read_github_file, "
+    "propose_github_push, and set_self_repo. When the user asks you to pull, open, read, review, analyze, "
+    "or change a GitHub repo, CALL these tools with the repo URL — do not say you lack access or ask them "
+    "to paste code. For any change/commit, call propose_github_push; it opens a review dialog for the user "
+    "to approve, so never claim something was pushed until they approve. When you propose a push that opens "
+    "a pull request, a clear PR summary is generated automatically. If the user tells you which repo is "
+    "YOUR OWN code, call set_self_repo to remember it. If a tool says GitHub is not connected, tell the user "
+    "to connect their token via the GitHub button in the chat toolbar.\n"
     "=== END GITHUB ABILITIES ===\n"
 )
 
@@ -952,7 +973,15 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     push_proposal = None
     try:
         if req.provider in ("openai", "anthropic") and not images:
-            tool_system = system_prompt + GH_TOOL_GUIDANCE
+            cfg = await db.github_config.find_one({"user_id": uid}) or {}
+            mem = ""
+            if cfg.get("self_repo"):
+                mem += f"\nYOUR OWN REPO (use when the user says 'your code'/'yourself'/'update yourself'): {cfg['self_repo']}"
+            if cfg.get("last_repo"):
+                mem += f"\nLAST REPO the user worked on (use when they say 'the repo'/'that repo' without a URL): {cfg['last_repo']}"
+            if not cfg.get("self_repo"):
+                mem += "\nIf the user asks you to modify your OWN code but no self-repo is set, ask which repo is yours, then call set_self_repo."
+            tool_system = system_prompt + GH_TOOL_GUIDANCE + mem
             hist = history
             if doc_text:
                 hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
@@ -1813,12 +1842,61 @@ async def gh_commit(req: GithubCommitReq, user=Depends(get_current_user)):
     result = {"commit_sha": new_sha, "branch": req.branch,
               "commit_url": f"https://github.com/{owner}/{repo}/commit/{new_sha}"}
     if req.open_pr and req.branch != base:
+        body = req.pr_body or await _generate_pr_summary(req.message, req.files)
         pr = await _gh(token, "POST", f"/repos/{owner}/{repo}/pulls",
-                       json={"title": req.pr_title or req.message, "body": req.pr_body or "",
+                       json={"title": req.pr_title or req.message, "body": body,
                              "head": req.branch, "base": base})
         result["pr_url"] = pr.json().get("html_url")
         result["pr_number"] = pr.json().get("number")
     return result
+
+
+async def _generate_pr_summary(message, files):
+    listing = "\n".join(f"- `{f.path}` ({len(f.content.splitlines())} lines)" for f in files)
+    try:
+        snippets = "\n\n".join(f"### {f.path}\n```\n{f.content[:1500]}\n```" for f in files[:6])
+        sys_p = ("You write concise, clear GitHub pull request descriptions in markdown. "
+                 "4-8 lines: a one-line summary, then a short bullet list of what changed and why.")
+        prompt = f"Commit message: {message}\n\nChanged files:\n{listing}\n\nFile contents:\n{snippets}\n\nWrite the PR description."
+        txt = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
+        txt = (txt or "").strip()
+        if txt:
+            return txt + f"\n\n---\n_Opened by Promethius._"
+    except Exception as e:
+        logger.error(f"pr summary error: {e}")
+    return f"{message}\n\n**Changed files:**\n{listing}\n\n_Opened by Promethius._"
+
+
+class GhDiffReq(BaseModel):
+    owner: str
+    repo: str
+    base_branch: str
+    files: List[GhFile]
+
+
+@api_router.post("/github/diff")
+async def gh_diff(req: GhDiffReq, user=Depends(get_current_user)):
+    """Return old vs new content for each file so the UI can show a before/after diff."""
+    token = await _gh_token(user["id"])
+    out = []
+    for f in req.files:
+        path = f.path.lstrip("/")
+        old, status = "", "added"
+        try:
+            r = await _gh(token, "GET", f"/repos/{req.owner}/{req.repo}/contents/{path}",
+                          params={"ref": req.base_branch})
+            data = r.json()
+            if isinstance(data, dict) and data.get("type") == "file":
+                try:
+                    old = base64.b64decode(data["content"].replace("\n", "")).decode("utf-8")
+                    status = "modified"
+                except Exception:
+                    old, status = "", "binary"
+        except HTTPException as e:
+            if e.status_code != 404:
+                raise
+        out.append({"path": f.path, "status": status, "old": old, "new": f.content})
+    return out
 
 
 app.include_router(api_router)
