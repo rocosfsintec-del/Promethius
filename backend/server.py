@@ -59,8 +59,8 @@ WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'Promethius')
 WEBAUTHN_EXPECTED_ORIGIN = os.environ.get('WEBAUTHN_EXPECTED_ORIGIN', 'http://localhost:3000')
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY') or ''
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
-DEFAULT_PROVIDER = "anthropic"
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL = "gpt-4o-mini"
 scheduler = AsyncIOScheduler()
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -594,7 +594,7 @@ async def extract_and_store_memory(user_id: str, user_msg: str, ai_reply: str, s
                  "Ignore trivia and one-off requests. Return ONLY a JSON array of short fact strings. "
                  "If there is nothing worth remembering, return [].")
         prompt = f"They said: {user_msg}\nAssistant replied: {ai_reply}\n\nReturn a JSON array of NEW durable facts about {subject}."
-        out = await run_llm("anthropic", "claude-haiku-4-5", sys_p, [{"role": "user", "content": prompt}])
+        out = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
         match = re.search(r"\[.*\]", out, re.S)
         facts = json.loads(match.group(0)) if match else []
         for f in facts:
@@ -1371,7 +1371,7 @@ async def execute_task(tid: str, user=Depends(get_current_user)):
     system_prompt += "\n\nYou are autonomously executing a task. Produce the complete deliverable/result directly."
     prompt = f"Task: {task['title']}\nDetails: {task.get('description','')}\n\nComplete this task now and return the full result."
     try:
-        result = await run_llm("anthropic", "claude-sonnet-4-6", system_prompt, [{"role": "user", "content": prompt}])
+        result = await run_llm("openai", "gpt-4o-mini", system_prompt, [{"role": "user", "content": prompt}])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)[:200]}")
     await db.tasks.update_one({"id": tid, "user_id": user["id"]}, {"$set": {"status": "done", "result": result}})

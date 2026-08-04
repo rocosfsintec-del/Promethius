@@ -10,8 +10,8 @@ export default function Workspace() {
   const [conversations, setConversations] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [providers, setProviders] = useState({});
-  const [provider, setProvider] = useState("anthropic");
-  const [model, setModel] = useState("claude-sonnet-4-6");
+  const [provider, setProvider] = useState("openai");
+  const [model, setModel] = useState("gpt-4o-mini");
   const [activeTool, setActiveTool] = useState(null);
 
   const refreshConversations = useCallback(() => {
