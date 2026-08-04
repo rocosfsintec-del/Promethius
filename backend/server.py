@@ -56,7 +56,15 @@ TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY') or ''
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY') or ''
 WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
 WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'Promethius')
-WEBAUTHN_EXPECTED_ORIGIN = os.environ.get('WEBAUTHN_EXPECTED_ORIGIN', 'http://localhost:3000')
+# Accept the served port (8001) AND the dev port (3000) by default, plus any
+# origins listed in WEBAUTHN_EXPECTED_ORIGIN (comma-separated). webauthn 3.0.0
+# accepts a list; RP ID stays a single host ('localhost' covers both ports).
+_base_wa_origins = [
+    "http://localhost:3000", "http://localhost:8001",
+    "http://127.0.0.1:3000", "http://127.0.0.1:8001",
+]
+_env_wa_origins = [o.strip().rstrip("/") for o in os.environ.get('WEBAUTHN_EXPECTED_ORIGIN', '').split(',') if o.strip()]
+WEBAUTHN_EXPECTED_ORIGIN = list(dict.fromkeys(_base_wa_origins + _env_wa_origins))
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY') or ''
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 DEFAULT_PROVIDER = "openai"
