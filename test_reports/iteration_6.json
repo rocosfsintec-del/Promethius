@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration-6: Verified Orb voice-chat backend pipeline + frontend regression after Orb.jsx fixes. Backend 5/5 passed (chat→Anthropic claude-sonnet-4-6 returns non-empty reply + conversation_id; voice/tts returns audio/mpeg with valid MP3 magic ~24KB; voice/transcribe route exists and responds with sane non-404 status; auth gating enforced on /api/chat; bad-password rejected). Frontend SPA loads on / (redirects to /login passkey screen) and /install with ZERO page errors and ZERO console errors. Code review of Orb.jsx confirmed all 3 fixes are in place.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iteration6_test.py",
+    "/app/test_reports/pytest/iteration6_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Orb.jsx speak() (lines 157-194): returns boolean (true on audio playback success, false on TTS failure). On catch, classifies 401/503 as 'Voice is unavailable (check your ElevenLabs API key).' and otherwise 'Voice playback failed.' — toast.error surfaces the spoken text as description (sliced 180 chars) so the user STILL sees the assistant reply even when ElevenLabs is broken. Exactly what was requested.",
+    "Orb.jsx ask() (lines 196-220): catch block now reads e?.response?.data?.detail || e?.message and calls toast.error('Promethius couldn't respond', { description: msg }). Additionally, if speak() returned false but reply text exists, a secondary toast() surfaces the reply (240 chars). The previous silent swallow is fully gone. Confirmed.",
+    "Orb.jsx handleFinal() (lines 294-319): wake-word detection switched from lastIndexOf('promethius') to text.match(/prom[ae]th[a-z]*/) — correctly matches 'prometheus', 'promethease', 'promathius' etc. Index + length are then used to slice the trailing query. Confirmed.",
+    "MINOR (pre-existing, not in scope): forget() catch still has bare '// ignore' (line 259). Not a regression — wasn't part of this fix — but the same anti-pattern that caused the original bug lives on for the enroll/forget commands.",
+    "Backend /api/voice/tts gracefully falls back to OpenAI TTS if ElevenLabs raises (lines 776-781). Cloud test confirmed ElevenLabs path is hit (24KB MP3 with ID3/0xFF header). Local users with empty ELEVENLABS_API_KEY will hit the OpenAI fallback — but their OpenAI key is OUT_OF_QUOTA per test_credentials.md, so they would 500. The new toast in speak() now correctly surfaces that to the user.",
+    "server.py still ~1390 lines, single module. Same long-standing recommendation: split into routers. Not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration6_test.py (new — 5 tests covering chat, tts, transcribe route, auth gating, bad-password)"
+  ],
+  "success_rate": { "backend": "100% (5/5)", "frontend": "100% (SPA loads cleanly on / and /install, 0 page errors, 0 console errors)" },
+  "test_credentials": "admin@promethius.ai / Fire2026! via POST /api/auth/login → JWT used as Bearer token for all backend tests.",
+  "seed_data_creation": "One conversation row created by the /api/chat smoke test (TEST chat message 'Say hello in 4 words.'). No teardown — single doc, negligible.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Six backend test suites: backend_test.py (regression), iteration2..5_test.py, iteration6_test.py (chat+tts+transcribe). All Orb.jsx voice/wake-word/error-surfacing fixes verified by code review — no UI testing of the orb itself is possible because it's behind a passkey login (WebAuthn cannot be exercised headlessly). The user's local 'no response' issue is now visible via toasts: if their local Anthropic key is empty they will see 'Promethius couldn't respond' with the actual server error; if their ElevenLabs key is empty they will see 'Voice is unavailable' plus the reply text as a toast. ELEVENLABS_API_KEY and ANTHROPIC_API_KEY in /app/backend/.env are valid in the cloud preview.",
+  "rca of the issue": "ROOT CAUSE (in user's local env): Orb.ask() previously swallowed all errors silently ('// ignore'), so if their local ANTHROPIC_API_KEY was empty/invalid the chat call failed with 500 but produced no UI feedback — user heard nothing and assumed the mic was broken. Compounding: (a) speak() also swallowed TTS errors, so even if chat succeeded, an empty ElevenLabs key would silently kill the voice; (b) wake-word required exact 'promethius' substring, but Chrome's SpeechRecognition transcribes it as 'prometheus'/'promethease', so the user's voice never even reached ask(). FIX VERIFIED: (1) ask() catch surfaces toast.error with server detail; (2) speak() returns bool + toast.error on TTS failure with the reply text as description so the user still sees the answer; (3) handleFinal() uses /prom[ae]th[a-z]*/ regex. MITIGATION FOR USER: open the install guide, double-check ANTHROPIC_API_KEY and ELEVENLABS_API_KEY in their local backend/.env, restart backend. The new toasts will now tell them exactly which key is bad."
+}

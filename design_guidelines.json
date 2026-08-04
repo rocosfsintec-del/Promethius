@@ -1,0 +1,124 @@
+{
+  "identity": {
+    "name": "Promethius",
+    "theme": "dark",
+    "archetype": "Archetype 5: Luxury & Archetype 4: Swiss High-Contrast Hybrid",
+    "vibe": "Elite, powerful, mysterious, architectural. The bringer of fire/knowledge.",
+    "core_emotion": "Awe and absolute control."
+  },
+  "colors": {
+    "background": {
+      "base": "bg-[#09090b]",
+      "description": "Deep obsidian/void. Never pure black #000000, tinted slightly with warm/cool tones depending on lighting."
+    },
+    "surface": {
+      "panel": "bg-[#121214]",
+      "glass": "bg-[#09090b]/70 backdrop-blur-2xl",
+      "glass_heavy": "bg-[#121214]/80 backdrop-blur-3xl",
+      "hover": "hover:bg-white/5"
+    },
+    "border": {
+      "subtle": "border-white/5",
+      "default": "border-white/10",
+      "focus": "border-orange-500/50"
+    },
+    "text": {
+      "primary": "text-zinc-50",
+      "secondary": "text-zinc-400",
+      "muted": "text-zinc-600",
+      "accent": "text-orange-500"
+    },
+    "accent": {
+      "primary": "bg-orange-600 hover:bg-orange-500 text-white",
+      "gradient": "bg-gradient-to-r from-orange-600 to-amber-500",
+      "glow": "shadow-[0_0_30px_rgba(234,88,12,0.15)]",
+      "description": "The 'Ember' representing Promethius' fire. Used very sparingly for voice active states, key CTAs, and AI response indicators."
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Cabinet Grotesk",
+      "body": "Manrope",
+      "mono": "JetBrains Mono"
+    },
+    "rules": {
+      "h1": "font-heading text-4xl md:text-5xl tracking-tighter text-zinc-50 font-medium",
+      "h2": "font-heading text-2xl md:text-3xl tracking-tight text-zinc-100",
+      "h3": "font-heading text-xl tracking-tight text-zinc-200",
+      "body": "font-body text-base text-zinc-300 leading-relaxed",
+      "metadata": "font-mono text-xs tracking-[0.05em] uppercase text-zinc-500"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous negative space. Elements should feel like they are floating in a void, anchored by precise 1px borders.",
+    "sidebar_left": "w-72 border-r border-white/5 bg-[#09090b] flex flex-col",
+    "sidebar_right": "w-80 border-l border-white/5 bg-[#09090b]/50 backdrop-blur-xl flex flex-col",
+    "chat_container": "flex-1 flex flex-col max-w-4xl mx-auto w-full pt-8 pb-32 px-4 md:px-8",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-4 gap-4"
+  },
+  "components": {
+    "chat_input_bar": {
+      "layout": "fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-3xl px-4 z-50",
+      "styling": "flex items-end gap-2 bg-[#121214]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-2 shadow-2xl transition-all duration-300 focus-within:border-orange-500/30 focus-within:shadow-[0_8px_40px_rgba(234,88,12,0.1)]",
+      "input_field": "w-full bg-transparent border-none text-zinc-50 placeholder:text-zinc-600 focus:ring-0 resize-none py-3 px-4 min-h-[52px] max-h-[200px] font-body",
+      "voice_button": "h-12 w-12 rounded-full flex items-center justify-center shrink-0 bg-[#1c1c1f] hover:bg-[#27272a] text-zinc-400 hover:text-zinc-50 border border-white/5 transition-colors relative",
+      "voice_button_active": "bg-gradient-to-tr from-orange-600 to-amber-500 text-white shadow-[0_0_20px_rgba(234,88,12,0.4)] animate-pulse"
+    },
+    "chat_messages": {
+      "user_bubble": "max-w-[80%] ml-auto bg-[#1c1c1f] border border-white/5 text-zinc-100 rounded-3xl rounded-tr-md px-6 py-4 font-body shadow-sm",
+      "ai_bubble": "max-w-[90%] mr-auto text-zinc-200 py-4 font-body leading-relaxed flex gap-6",
+      "ai_avatar": "w-8 h-8 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0 text-orange-500",
+      "streaming_indicator": "inline-block w-2 h-4 bg-orange-500 animate-pulse ml-1"
+    },
+    "model_selector": {
+      "trigger": "flex items-center gap-2 px-4 py-2 rounded-full bg-[#121214] border border-white/5 hover:border-white/10 text-sm font-medium text-zinc-300 transition-colors cursor-pointer",
+      "dropdown": "bg-[#121214] border border-white/10 rounded-xl shadow-xl overflow-hidden backdrop-blur-xl"
+    },
+    "memory_panel": {
+      "container": "h-full overflow-y-auto p-6 space-y-6",
+      "card": "bg-[#121214] border border-white/5 hover:border-white/10 rounded-2xl p-4 transition-all group",
+      "fact_badge": "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 text-zinc-300 text-xs font-mono border border-white/5"
+    },
+    "knowledge_vault": {
+      "upload_zone": "border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:border-orange-500/30 hover:bg-orange-500/5 transition-colors cursor-pointer",
+      "file_item": "flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-transparent hover:border-white/10 transition-colors"
+    },
+    "data_attributes": {
+      "rules": "All interactive elements MUST include data-testid. Kebab-case, role-based.",
+      "examples": [
+        "data-testid='chat-input-textarea'",
+        "data-testid='voice-record-button'",
+        "data-testid='model-selector-trigger'",
+        "data-testid='memory-fact-item'"
+      ]
+    }
+  },
+  "motion_and_interactions": {
+    "hover_states": "Elements should gently lighten (bg-white/5) on hover. Borders transition from white/5 to white/10.",
+    "transitions": "transition-all duration-300 ease-out",
+    "entrance_animations": "Staggered fade and slide up for lists (Memories, Files, Tasks).",
+    "accessibility": "Respect prefers-reduced-motion. Use aria-hidden on purely decorative visual elements."
+  },
+  "media": {
+    "login_background": {
+      "url": "https://images.pexels.com/photos/9665179/pexels-photo-9665179.jpeg",
+      "description": "Illuminated dust particles in a dark void. Represents the 'spark' of Promethius in the darkness."
+    },
+    "empty_state_texture": {
+      "url": "https://images.unsplash.com/photo-1578662996442-48f60103fc96",
+      "description": "Dark atmospheric texture. Use at 10% opacity as an absolute background layer in empty chat states to prevent flatness."
+    },
+    "user_avatar_fallback": {
+      "url": "https://images.unsplash.com/photo-1511367461989-f85a21fda167",
+      "description": "Minimal professional silhouette."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install required fonts (Cabinet Grotesk, Manrope, JetBrains Mono) via Google Fonts or standard imports.",
+    "Strictly follow the color palette. Do NOT use default Tailwind blue or generic grays. Use the specified zinc and orange hexes.",
+    "Implement the Chat Input Bar as a floating element (`fixed bottom-8`), NOT attached to the bottom edge of the screen.",
+    "Use Lucide-React icons but override the stroke width to 1.5 for a finer, more elegant look.",
+    "Ensure all Shadcn components (Dialogs, Selects, Dropdowns) are stripped of their default light-mode shadows and given the dark glassmorphism styling defined in 'surface.glass'.",
+    "Add 'data-testid' to every actionable button, input, and list item."
+  ]
+}

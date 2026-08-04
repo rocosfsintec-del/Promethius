@@ -1,0 +1,29 @@
+{
+  "summary": "Iteration 9 review (PWA + Install Desktop + boot scripts). All 8 backend pytest checks pass: GET /api/=200, password login returns JWT, POST /api/chat (anthropic, claude-sonnet-4-6) returns non-empty reply, POST /api/voice/tts returns audio/mpeg, and the 5 PWA root assets (/manifest.json, /service-worker.js, /favicon.ico, /promethius-192.png, /promethius-512.png) all serve with correct content-types. Frontend: title 'Promethius', service worker registers at scope '/', 0 console errors on / and /install, JWT injection lets orb render without the passkey ceremony, and the Settings modal footer renders the Install Desktop App control (data-testid='install-app-button' in fallback state since headless Chrome did not fire beforeinstallprompt — which the request explicitly says is ACCEPTABLE).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/iteration9_test.py",
+    "/app/test_reports/pytest/iteration9_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py (lines 1379-1396): SPA serving block is correctly placed AFTER app.include_router(api_router), gated on (FRONTEND_BUILD/index.html).is_file(), and the catch-all serve_spa returns JSON 404 for paths starting with 'api/' or 'api' before falling back to index.html — so /api/* always hits the FastAPI router. In this preview env /app/frontend/build does not exist, so the block stays inactive and the dev frontend on port 3000 is unaffected (verified manifest.json/service-worker.js still served by CRA dev server).",
+    "public/index.html: <link rel='manifest' href='%PUBLIC_URL%/manifest.json'>, <link rel='icon' href='favicon.ico'>, <link rel='apple-touch-icon' href='promethius-512.png'>, <title>Promethius</title>, no emergent/posthog references. Clean.",
+    "public/manifest.json: short_name 'Promethius', display 'standalone' with display_override ['fullscreen','standalone'], start_url '/', icons include 192 + 512 with purpose 'any maskable'. Valid for installability.",
+    "public/service-worker.js: network-first GET only, explicitly bypasses '/api/' (line 22 'if (req.method !== \"GET\" || req.url.includes(\"/api/\")) return;'), skipWaiting + clients.claim — safe.",
+    "src/pwa.js: registers SW on window.load, captures beforeinstallprompt into window.__promethiusInstallPrompt, emits 'pwa-installable'/'pwa-installed' custom events. Clean.",
+    "src/index.js: setupPWA() called at module top — runs once. Good.",
+    "components/InstallButton.jsx: renders data-testid='install-app-button' when not installed (fires captured prompt, falls back to toast with browser-menu instructions) and data-testid='install-app-status' when isStandalone() matches. Matches spec exactly.",
+    "components/VoiceSettings.jsx: <InstallButton /> is rendered in the modal footer div (line 301), inside a px-4 py-3 border-top divider — visible regardless of active tab.",
+    "Windows scripts (build/run/launch/install/uninstall/promethius-hidden.vbs) are all present at /app root and self-consistent: build-promethius.bat runs yarn build, run-promethius.bat starts uvicorn on 0.0.0.0:8001, launch-promethius.bat probes /api/ and opens Chrome/Edge with --app=http://localhost:8001 --start-fullscreen, install-promethius.ps1 creates a Desktop .lnk pointing at launch-promethius.bat with promethius.ico and registers a logon ScheduledTask running wscript on promethius-hidden.vbs (which silently spawns run-promethius.bat). uninstall-promethius.ps1 cleanly removes both. Cannot execute on Linux — reviewed by content only as instructed."
+  ],
+  "updated_files": ["/app/backend/tests/iteration9_test.py"],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% (load + SW registers + settings modal renders Install control on / and /install with 0 console errors)"},
+  "test_credentials": "admin@promethius.ai / Fire2026! (password API only; UI is passkey-only — JWT injected into localStorage 'promethius_token' for headless testing)",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression for this iteration: /app/backend/tests/iteration9_test.py (loads REACT_APP_BACKEND_URL from /app/frontend/.env if not in environ). The Install Desktop App button in headless Chrome will render in its fallback state (data-testid='install-app-button' with text 'Install Desktop App') because beforeinstallprompt does not fire — this is expected and acceptable. To exercise the authed orb screen without the passkey, POST /api/auth/login then page.add_init_script to set localStorage.promethius_token before navigating to /. /api/chat requires field 'message' (string), NOT 'messages'.",
+  "rca of the issue": "N/A — all features verified working."
+}

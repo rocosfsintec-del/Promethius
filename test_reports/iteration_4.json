@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration-4 testing: Prime Directives, Voice-biometric Speaker Recognition (enroll/identify/list/delete), per-person memory, Settings modal 3-tabs. Backend: 5/5 new iteration4 tests + 24/24 regression all green (29/29 total). Frontend: 8/8 UI checks passed end-to-end via Playwright with admin@promethius.ai.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/iteration4_test.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration4_results.xml",
+    "/app/test_reports/pytest/regression4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1136 lines — still a single module. Recommend splitting into routers (auth/chat/voice/speakers/directives/image/video/tools/scheduled/memory/vault/projects/journal/admin). Same recommendation since iteration-2.",
+    "Speakers list endpoint correctly strips embeddings (large vectors) from JSON, prevents leaking voiceprints to UI.",
+    "DELETE /api/speakers/{sid} also deletes that speaker's tagged memories — correct cascade. Good.",
+    "GET /api/directives semantics: is_default true ONLY when no doc was ever set. Once any custom value is saved (even matching the default text), is_default returns false permanently — acceptable but documented.",
+    "wav_embedding rejects < 0.5s audio (returns None) — good guard; identify with unreadable WAV returns {speaker:null, score:0} (200 OK), graceful.",
+    "build_system_prompt prepends '=== PRIME DIRECTIVES ===' block — confirmed obeyed end-to-end (a directive 'Always call the user Commander' caused the model to begin replies with 'Commander').",
+    "extract_and_store_memory correctly scopes by speaker (separate per-person memory), verified by isolation test: an astronomy fact for 'Sarah' was stored with speaker tag and did NOT leak into owner-scope memories.",
+    "SPEAKER_THRESHOLD=0.88 chosen well: synthetic same-seed 180Hz harmonic WAVs scored above threshold (matched), 420Hz different speaker scored below (null) — recognition discriminates."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration4_test.py (new — 5 tests: directives default+custom+chat-obeys, fresh-user defaults, speaker enroll/re-enroll/identify same+different/list/delete, per-person memory isolation, anthropic chat regression)"
+  ],
+  "success_rate": {"backend": "100% (5/5 iteration4 + 24/24 regression = 29/29)", "frontend": "100% (8/8 UI checks)"},
+  "test_credentials": "admin@promethius.ai / Fire2026!",
+  "seed_data_creation": "Tests are fully self-cleaning: TEST_-prefixed speakers deleted after each test, transient conversations deleted, directives restored to pre-test content, per-speaker memories removed via DELETE /api/speakers/{id} cascade. One residual: TestDirectives.test_fresh_user_directives_default creates a one-time TEST_dir_<ts>@promethius.ai user (no delete endpoint exists for users — same as iteration_2 pattern).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Four backend test files: backend_test.py (regression 24 tests ~12s), iteration2_test.py (advanced abilities ~110s), iteration3_test.py (orb-mode 5 tests ~8s), iteration4_test.py (this iteration: 5 tests ~18s — directives, speakers, per-person memory). To run new + regression: `pytest /app/backend/tests/iteration4_test.py /app/backend/tests/backend_test.py -v --tb=short`. Speaker tests generate synthetic 16kHz mono PCM WAVs with sine harmonics + tiny noise — DO NOT replace with pure sine waves (MFCC variance becomes near-zero and identify may misclassify). Live microphone / Web Speech API cannot be exercised headless. Settings modal: data-testid='voice-settings-modal', tabs settings-tab-{voice,directives,people}, directives-input + save-directives-button, person-<id>/remove-person-<id>, voice-option-<id>, close-settings-button. Settings opens from BOTH orb-settings-button (route '/') and sidebar settings-link (route '/chat').",
+  "rca of the issue": "No bugs found. All iteration-4 additions work end-to-end. Prime Directives are correctly injected at top of system prompt and obeyed by claude-sonnet-4-6. MFCC voiceprint enrolment, multi-embedding update (re-enroll), cosine-sim identification with 0.88 threshold, list with memory_count, and cascading delete (speaker + tagged memories) all verified. Per-person memory scope is enforced — speaker-tagged facts do not leak into owner scope and vice versa."
+}

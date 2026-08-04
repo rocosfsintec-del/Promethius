@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 10 — verified that the cloud-served app DOES contain the recent features (proving the code is present) and that the new pwa.js dev self-heal is correct + non-breaking. Backend regression (8/8 pytest) green: GET /api/=200, password login JWT ok, /api/chat (anthropic/claude-sonnet-4-6) returns non-empty reply, /api/voice/tts returns audio/mpeg, and PWA root assets (/manifest.json, /service-worker.js, /favicon.ico, /promethius-192.png, /promethius-512.png) all serve. Frontend: title 'Promethius', 0 console errors on / and /install. JWT injection into localStorage 'promethius_token' lets the orb render. Verified data-testids: orb-fullscreen-button (top bar), orb-settings-button, install-app-button (footer text 'Install Desktop App' — fallback state since headless Chrome does not fire beforeinstallprompt, expected), and on the Orb appearance tab orb-save-button reads 'Locked in' (saved-state form of 'Apply Changes' — both states defined in components/VoiceSettings.jsx line 93). SW gating fix verified: navigator.serviceWorker.getRegistrations() returns 0 on both / and /install, navigator.serviceWorker.controller is null, and no console error is thrown by pwa.js — the dev branch's unregister + caches.delete loop is working as intended.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/iteration9_test.py",
+    "/app/test_reports/pytest/iteration10_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "src/pwa.js: const isProd = process.env.NODE_ENV === 'production' — CRA inlines this at build time, so the served bundle in this preview env (running CRA dev server, NODE_ENV='development') takes the else branch. Verified at runtime: getRegistrations()=0 on / and /install. Production path (when NODE_ENV==='production') registers /service-worker.js on the load event — correct. The dev self-heal calls getRegistrations().forEach(r => r.unregister()) AND caches.keys().then(keys => keys.forEach(k => caches.delete(k))) — both guarded with .catch(() => {}) so a failure cannot throw. beforeinstallprompt + appinstalled listeners are attached unconditionally outside the isProd branch — correct, so the Install Desktop App button keeps working in both envs.",
+    "Minor (non-blocking): the dev self-heal fires every page load. That's fine because once registrations are empty the loop is a no-op. No need to memoize.",
+    "Minor (non-blocking): the SW unregister/cache wipe is fire-and-forget; on a very fast first navigation after a stale SW intercepted the request, the *current* page may still be served by the old SW (the next reload is clean). Not a real-world issue because the user is doing git pull + reload, but worth noting. Could be improved by location.reload() after unregister resolves — only if you observe complaints; not required.",
+    "VoiceSettings.jsx (line 91-93): data-testid='orb-save-button' renders 'Apply Changes' when dirty, '<Loader2> spinner' when saving, '<Check> Locked in' when settings match saved state. All three states match the spec.",
+    "InstallButton.jsx: data-testid='install-app-button' (action) and 'install-app-status' (when isStandalone()) — both rendered conditionally. In headless Chrome with beforeinstallprompt absent it falls back to a toast — correct.",
+    "Orb.jsx (line 442): data-testid='orb-fullscreen-button' calls toggleFullscreen with proper title prop — present in the orb top-bar."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% (0 console errors on / and /install, all 4 data-testids verified, SW gating correctly inert in dev)"},
+  "test_credentials": "admin@promethius.ai / Fire2026! (password API; passkey-only UI — JWT injected into localStorage 'promethius_token' for headless)",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression is /app/backend/tests/iteration9_test.py (still valid; renamed it would break tracking). For frontend: same-origin fetch to /api/auth/login from inside page.evaluate works; direct urllib from outside the browser returns 403 on the preview ingress. JWT key is 'promethius_token'. /api/chat field is 'message' (singular). The orb-save-button only exists when the Orb settings tab is active — click the 'Orb' tab button before querying it.",
+  "rca of the issue": "User report 'nothing has changed after git pull + reload' was almost certainly the user's local browser being controlled by a previously-registered service worker that cached the old bundle. The fix in src/pwa.js (gate registration behind NODE_ENV==='production' and aggressively unregister + clear caches in development) is correct and verified non-breaking on the cloud preview. The cloud-served app DOES contain all recent features (Install button in modal footer, orb-fullscreen-button, orb-save-button with Apply Changes/Locked in states), so the code IS present on the cloud — the user just needs to pull and hard-reload once for the dev self-heal to kick in; subsequent reloads will be SW-free."
+}

@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 13 — Auto-research + standby + wake-lock verification. Backend 6/6 pytest green: (1) POST /api/chat with factual question 'What is the latest version of Python and when was it released?' (no use_web_search flag) returns 200 with a Python-mentioning reply — auto-research triggered via Tavily as designed. (2) Small-talk 'hello there' returns 200 non-empty reply, does NOT force research (verified heuristic returns False). (3) Explicit use_web_search=true for 'current weather in Tokyo' returns 200 non-empty reply mentioning Tokyo/Japan/weather. (4) /api/voice/tts returns 200 audio/mpeg >500 bytes. (5) GET /api/ = 200 with 'Promethius' message. (6) Direct unit-style test of should_auto_research() confirms: 'What is...?' 'who won...' 'current weather...' -> True; 'hello there' 'hi' 'thanks' 'standby' -> False. Frontend 0 console errors on both /install and / (Orb) after JWT injection into localStorage.promethius_token; cyan plasma orb renders, all data-testids present (orb-canvas, orb-settings-button, orb-fullscreen-button, orb-open-chat-button, orb-logout-button, orb-status), orb-status='Listening — just speak to Promethius'. Code review passed: server.py:626 should_auto_research heuristic exists with proper trigger word set and small-talk short-circuit; server.py:711 chat() sets do_research=use_web_search OR (TAVILY_API_KEY and should_auto_research(message)); server.py:718-726 injects 'LIVE WEB RESEARCH' block with explicit cross-check + discard-single-source + anti-fallacy directive; PERSONA (server.py:73-83) contains truth/verification language ('you value truth', 'cross-check sources', 'watch for logical fallacies', 'honest about uncertainty'). Orb.jsx:312-320 standbyRef gates handleFinal — enters standby on /stand\\s?by/, only exits on /prom[ae]th[a-z]*/ (matches 'promethius' 'promathius' etc). Orb.jsx:444-460 wake-lock useEffect requests navigator.wakeLock('screen') on mount and re-acquires on visibilitychange. Orb.jsx:435-440 auto-awaken on mount (no tap, no wake-word required — every phrase is interpreted). Windows .bat/.ps1 not exercised (host is Linux) but code-reviewed as requested.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/iteration13_test.py",
+    "/app/test_reports/pytest/iteration13_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "should_auto_research heuristic (server.py:631) has a subtle bug: `m in _NO_RESEARCH or any(m == g or m.startswith(g + ' ') and len(m) < 14 for g in _NO_RESEARCH)` — operator precedence means `startswith(g+' ') and len(m)<14` binds first, then OR'd with `m==g`. Combined with the outer `any(m==g or ...)`, this works but is hard to read. Effectively 'good morning champ' (len 19) would NOT be short-circuited and could pass to trigger heuristic — but since it contains no trigger words and has no '?', it still returns False. Non-blocking; consider rewriting as explicit `if m in _NO_RESEARCH: return False` for clarity.",
+    "should_auto_research triggers include very common words like 'do ', 'is ', 'are ', 'can ' which will cause research on many non-factual conversational messages (e.g., 'can you write me a poem'). This inflates Tavily usage. Consider tightening triggers or adding a max-length/first-word check. Non-blocking.",
+    "The 'LIVE WEB RESEARCH' block is only injected when tavily_search returns a non-None value — good. But if Tavily returns an empty results list, the block is still injected (with empty ctx). Consider guarding on `res.get('results') or res.get('answer')` being non-empty. Non-blocking.",
+    "Orb.jsx wake-lock useEffect (line 444) never releases on standby entry — the lock remains active during standby (intended, per the code comment 'including standby'), but the returned lock reference is closured over `let lock` and only released on unmount. If wakeLock is auto-released by the browser (tab hidden), the re-acquire on visibilitychange handles it. Correct as designed.",
+    "Orb.jsx useOrbCanvas dependency array (line 92) still omits voiceRef and flashRef — carried over from iteration 12. Non-blocking as refs are stable.",
+    "Windows install-promethius.ps1 / update-promethius.bat not exercised (Linux host) — reviewed as requested only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration13_test.py"
+  ],
+  "success_rate": {"backend": "100% (6/6 pytest)", "frontend": "100% (0 console errors on / and /install, all orb testids render)"},
+  "test_credentials": "admin@promethius.ai / Fire2026! — JWT injected via localStorage.promethius_token (UI is passkey-only in headless).",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/iteration13_test.py for auto-research regression. Auto-research works via Tavily (TAVILY_API_KEY set in backend .env). Heuristic should_auto_research at server.py:626 — small-talk suppressed via _NO_RESEARCH set, factual questions triggered by 'wh-', modal verbs, and '?'. Chat endpoint field is 'message'. Standby, always-listening, and wake-lock features require mic + Chrome + user gesture and cannot be exercised headlessly — verified by code review only (Orb.jsx:312-320, 435-440, 444-460). Windows .bat/.ps1 review-only.",
+  "rca of the issue": "No defect this iteration. All new backend behaviors (auto-research, small-talk pass-through, explicit web search) work as specified. Frontend Orb + install pages continue to load cleanly with 0 console errors."
+}

@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 8 review: settings persistence (provider/model/orb) via PUT /api/settings + GET /auth/me verified; chat (anthropic, claude-sonnet-4-6) + ElevenLabs TTS regression passing; frontend / and /install load with 0 console errors, title 'Promethius', no 'Made with Emergent' badge, no posthog, no emergent references. Code review of ChatPanel/Markdown/Orb/VoiceSettings confirms all requested changes are in place. All checks PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iteration8_test.py",
+    "/app/test_reports/pytest/iteration8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ChatPanel.jsx line 228: assistant messages render via <Markdown>{m.content}</Markdown>; user bubble still uses <p> (correct per spec). data-testid='speak-button' preserved.",
+    "Markdown.jsx exists: uses react-markdown + remark-gfm; links open in new tab; code blocks rendered via <pre><code> and inline <code> with custom classes.",
+    "Orb.jsx: no drawBolt / lightning / arcs drawing in the render loop. Uses radial-gradient halo/aura/core whose alpha + radii scale with `bright = (eff + voiceSmooth*0.5) * glow`. data-testid='orb-fullscreen-button' present and toggles document.fullscreenElement via requestFullscreen / exitFullscreen. ask() uses modelRef (loaded from /auth/me provider/model) not hardcoded.",
+    "VoiceSettings.jsx AppearanceTab: data-testid='orb-save-button' shows 'Apply Changes' when dirty and 'Locked in' (disabled, green) after apply; slider relabeled 'Glow intensity' (was 'Lightning intensity'). NOTE: the underlying orb config key is still `cfg.lightning` (now treated as glow multiplier in Orb.jsx) — purely cosmetic but worth noting for future refactor.",
+    "server.py: no EMERGENT_LLM_KEY defined anywhere. /api/settings (PUT) now accepts provider/model/voice_id/orb and only $sets keys that are explicitly provided (partial updates safe).",
+    "public/index.html: title='Promethius', no posthog/emergent badge/scripts. <meta description> correctly Promethius-branded."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iteration8_test.py"
+  ],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% (load + debrand + console-clean on / and /install)"},
+  "test_credentials": "admin@promethius.ai / Fire2026! (password API only; UI is passkey-only and not headless-testable)",
+  "seed_data_creation": "None — used existing admin account. test_settings_persist_provider_model_orb mutates the admin's provider/model/orb.color to anthropic/claude-sonnet-4-6/#22d3ee.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression suite for this iteration is /app/backend/tests/iteration8_test.py. The orb canvas, voice mic, fullscreen toggle, settings modal Apply Changes/Locked-in flow, and markdown rendering of assistant replies all sit behind passkey login which CANNOT be exercised in a headless browser (no authenticator). To test the authenticated SPA, obtain a JWT via POST /api/auth/login and inject it as localStorage 'promethius_token' before navigating.",
+  "rca of the issue": "N/A — all requested features verified working."
+}

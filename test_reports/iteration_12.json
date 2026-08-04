@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 12 — Regression sweep after Orb.jsx green-flash change (useOrbCanvas now takes a 5th flashRef arg; commitEnrollment briefly flashes orb GREEN for 1.8s and shows '✓ [name] remembered' after successful /speakers/enroll). Backend: 8/8 pytest green — GET /api/=200, POST /api/chat (anthropic, claude-sonnet-4-6, field 'message') returns 200 with non-empty reply, POST /api/voice/tts returns 200 audio/mpeg, all PWA root assets 200. Frontend: title 'Promethius', 0 console errors on both /install AND / (Orb) after JWT injection into localStorage 'promethius_token'. Orb canvas renders (1920x1080, cyan plasma visible in screenshot), all data-testids present (orb-canvas, orb-settings-button, orb-fullscreen-button, orb-open-chat-button, orb-logout-button, orb-status). Settings modal opens correctly on click (VoiceSettings tabs visible: Voice/Orb/Laws/People/Keys). Fullscreen button clickable without error. Code review of Orb.jsx confirms the flashRef wiring is correct: useOrbCanvas signature accepts flashRef (line 12), render() overrides r=34,g=211,b=120 when flashRef.current > Date.now() (line 34), flashRef useRef(0) declared (line 110), passed into useOrbCanvas (line 130), commitEnrollment sets flashRef.current = Date.now()+1800 and setMode('speaking', '✓ name remembered') on successful POST /api/speakers/enroll (lines 245-247). No regression. The user's ERR_CONNECTION_REFUSED on localhost:8001 is a Windows-local hidden-boot process issue (not reproducible here) — served app is healthy.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/iteration9_test.py",
+    "/app/test_reports/pytest/iteration12_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Orb.jsx useOrbCanvas dependency array (line 92) does NOT include voiceRef or flashRef, only [canvasRef, energyRef, configRef]. In practice this is harmless because all four refs are stable useRef objects whose identity never changes — but for correctness/consistency the deps array should list all refs it reads. Non-blocking; the effect only mounts once anyway.",
+    "The green flash color (r=34, g=211, b=120) is hard-coded inline in useOrbCanvas rather than being surfaced as a constant (e.g., FLASH_COLOR_ENROLLED at top of file). Minor readability nit — non-blocking.",
+    "commitEnrollment (lines 238-254) swallows errors silently and still calls ask(utterance, name). This is intentional per the code comment ('enrollment failed — still respond') but the user gets no feedback that voiceprint save failed. Consider adding a toast.warning on the catch branch. Non-blocking.",
+    "All previous review items from iterations 5-11 remain resolved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% (0 console errors on / and /install, orb + all testids render, settings modal opens)"},
+  "test_credentials": "admin@promethius.ai / Fire2026! — JWT injected via localStorage 'promethius_token' (UI is passkey-only in headless).",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/iteration9_test.py for backend regression. For frontend orb testing, curl POST /api/auth/login (with User-Agent header — Python urllib default UA is 403-blocked; requests/curl work) to get JWT, then page.add_init_script(\"localStorage.setItem('promethius_token','<token>')\") BEFORE navigation to '/'. Orb data-testids: orb-canvas, orb-settings-button, orb-fullscreen-button, orb-open-chat-button, orb-logout-button, orb-status, orb-install-guide-link. The green-flash effect only triggers during /speakers/enroll success — cannot be exercised headlessly (requires mic input + spoken 'This is <name>' + follow-up utterance).",
+  "rca of the issue": "Not an app defect this iteration. User's ERR_CONNECTION_REFUSED on localhost:8001 is an environmental Windows hidden-boot-process issue (the on-boot Promethius instance didn't start or crashed). Cannot reproduce on this Linux host. The Orb.jsx green-flash change did NOT break the module — verified: 0 console errors on both / and /install, orb renders, all controls present and clickable, backend 8/8 green."
+}

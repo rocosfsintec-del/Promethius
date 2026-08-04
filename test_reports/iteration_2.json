@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration-2 testing of Promethius NEW abilities. Backend: 36/36 pytest tests passed (12 new iteration-2 + 24 regression). Real-network paths verified end-to-end: ElevenLabs TTS returned audio/mpeg bytes, Tavily-backed research returned full Claude-written report with sources, URL reader summarized example.com, CSV data analysis returned columns/preview/stats/chart/insight, code-execution sandbox returned stdout '4' and properly enforced 20s timeout, fal.ai LTX-2 text-to-video returned a real mp4 URL (https://v3b.fal.media/...), scheduled jobs full lifecycle (create -> list -> run-now -> Claude output -> delete), and image edit gracefully 500s due to OOQ OpenAI key. Frontend: 14/14 UI checks passed end-to-end as admin@promethius.ai — sidebar shows the new 7 tool grid (memory, vault, projects, journal, studio, tools, schedule labelled 'AUTO'), Tools panel CodeTool ran and showed '4', URL reader rendered summary for example.com, Research tab rendered report+citations, Data tab rendered recharts bar chart + AI insight after CSV upload, Studio video generation produced a playable <video> tag from fal.ai, Schedule panel created a job and 'run now' button surfaced SCHEDULED_OK output. Default chat is Anthropic claude-sonnet-4-6 and continues to work.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/tasks/{id}/execute", "issue": "Still hard-coded to provider='openai', model='gpt-4o-mini' (line 845). Returns clean 500 due to OOQ key. Should be switched to anthropic/claude-sonnet-4-6 like /api/scheduled/{id}/run already does."},
+      {"endpoint": "GET /api/conversations/{id}/messages", "issue": "Still returns 200 + [] for non-existent / other-user conversations instead of 404 (carried over from iteration_1)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Tools -> Data tab", "issues": ["Recharts emits a transient console warning 'The width(-1) and height(-1) of chart should be greater than 0' during the brief moment the ResponsiveContainer mounts inside a flexbox before its parent has measured layout. Chart still renders correctly. Adding minWidth: 0 (or a fixed height like h-56) on the chart wrapper div would silence it."]},
+      {"screen": "Sidebar", "issues": ["The 7th tool icon shows the label 'AUTO' but its data-testid is 'tool-schedule' and the panel title is 'Schedule'. Label vs identifier mismatch is intentional/cosmetic but slightly confusing — consider relabeling to 'SCHED' or 'AUTO'/Schedule consistency."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/iteration2_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/iteration2_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Switch /api/tasks/{id}/execute from openai/gpt-4o-mini default to anthropic/claude-sonnet-4-6 (line 845 server.py) so the autonomous task runner works with the user's valid key — already done for the scheduled-job runner.",
+    "(Optional) Wrap recharts ResponsiveContainer in a div with explicit height (e.g. h-56) or minWidth:0 to suppress 'width(-1) height(-1)' warning when Data panel first mounts.",
+    "(Optional) Pick a single label for the 7th sidebar tool — UI says 'AUTO', panel says 'Schedule', testid is tool-schedule."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew from 695 -> 945 lines this iteration; the file now mixes ~12 feature areas. Strongly recommend splitting into routers (auth, chat, voice, image, video, tools, scheduled, files, memory, vault, projects, journal, admin) before iteration_3 to keep it maintainable.",
+    "/api/tools/run-code uses subprocess.run with sys.executable and the host's full Python environment. The 20s timeout is correct, but the sandbox has FULL access to /app, the .env file and the Mongo URL. Not user-exposed today (auth-only), but ANY future move to multi-tenant must containerize this (firejail, gVisor, or run in an ephemeral worker). Flag this loudly.",
+    "scheduled jobs are re-added on startup via _add_job(j) — good. APScheduler is in-process; if the worker restarts the in-flight job (if any) is lost. Acceptable for MVP.",
+    "All new endpoints correctly use the /api prefix, all Mongo queries exclude _id, JWT auth dependency applied uniformly.",
+    "fal_client import is inside the handler (correct lazy import to avoid import-time crash if FAL_KEY missing).",
+    "ElevenLabs voice handler catches its own exception and falls back to OpenAI TTS — clean.",
+    "tools/analyze-data uses pandas df.head(5000) limit — sensible against abusive uploads.",
+    "All required data-testids are present (verified via grep on RightPanel.jsx and Sidebar.jsx)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (replaced the two 503 'not configured' tests with a positive Tavily search test; Tavily key is now configured)",
+    "/app/backend/tests/iteration2_test.py (new — 12 tests covering code/research/url/data/voice/video/image-edit/scheduled)"
+  ],
+  "success_rate": {"backend": "100% (36/36 — 12 new + 24 regression)", "frontend": "100% (14/14 UI checks)"},
+  "test_credentials": "admin@promethius.ai / Fire2026!",
+  "seed_data_creation": "Backend tests prefix data with TEST_ and self-clean. UI test left one TEST_UI_sched (deleted within the same run via lifecycle is in backend test only; UI test left it) and one 'TEST_UI_Journal entry' — tiny volume.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend suite split into two files: /app/backend/tests/backend_test.py (regression, fast ~7s) and /app/backend/tests/iteration2_test.py (new abilities, ~113s because of real fal.ai LTX-2 call and Anthropic Claude calls). Both pass clean. fal.ai, Tavily and ElevenLabs keys are valid; OpenAI key is OOQ — any 500 from /image/generate, /image/edit, /voice/transcribe, /tasks/{id}/execute is expected-graceful, not a bug. Use admin@promethius.ai / Fire2026!. To run everything: pytest /app/backend/tests/ -v --tb=short --junitxml=/app/test_reports/pytest/all.xml (allow ~150s).",
+  "rca of the issue": "No bugs found this iteration — all new abilities work end-to-end against real third-party services."
+}
