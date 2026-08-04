@@ -26,7 +26,7 @@ function extractCodeBlocks(text) {
   return blocks;
 }
 
-export default function GithubPush({ open, onClose, lastAssistantMessage }) {
+export default function GithubPush({ open, onClose, lastAssistantMessage, initialProposal }) {
   const [status, setStatus] = useState(null); // {connected, login}
   const [tokenInput, setTokenInput] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -69,11 +69,26 @@ export default function GithubPush({ open, onClose, lastAssistantMessage }) {
 
   useEffect(() => {
     if (open) {
-      setStep("compose");
       setResult(null);
       loadStatus();
+      if (initialProposal) {
+        setRepo({
+          full_name: initialProposal.full_name,
+          owner: initialProposal.owner,
+          name: initialProposal.repo,
+          default_branch: initialProposal.branch,
+        });
+        setBranch(initialProposal.branch || "main");
+        setMessage(initialProposal.message || "Update from Promethius");
+        setFiles(initialProposal.files || []);
+        setCreateBranch(!!initialProposal.create_branch);
+        setOpenPr(!!initialProposal.open_pr);
+        setStep("review");
+      } else {
+        setStep("compose");
+      }
     }
-  }, [open, loadStatus]);
+  }, [open, loadStatus, initialProposal]);
 
   const connect = async () => {
     if (!tokenInput.trim()) return;

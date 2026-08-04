@@ -737,6 +737,169 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
     return resp.choices[0].message.content
 
 
+# ---------------------------------------------------------------------------
+# GitHub tools for the chat model (read any repo; propose pushes for approval)
+# ---------------------------------------------------------------------------
+def _parse_repo_url(url: str):
+    m = re.search(r"github\.com[:/]+([^/\s]+)/([^/\s#?]+)", url or "")
+    if not m:
+        # allow bare "owner/repo"
+        m2 = re.match(r"^\s*([\w.-]+)/([\w.-]+)\s*$", url or "")
+        if not m2:
+            raise HTTPException(status_code=400, detail="Could not read a GitHub repo from that URL")
+        owner, repo = m2.group(1), m2.group(2)
+    else:
+        owner, repo = m.group(1), m.group(2)
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return owner, repo
+
+
+async def _repo_default_branch(token, owner, repo):
+    info = await _gh(token, "GET", f"/repos/{owner}/{repo}")
+    return info.json().get("default_branch", "main")
+
+
+async def _tool_list_files(user_id, repo_url, branch=None):
+    token = await _gh_token(user_id)
+    owner, repo = _parse_repo_url(repo_url)
+    branch = branch or await _repo_default_branch(token, owner, repo)
+    tree = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/trees/{branch}", params={"recursive": "1"})
+    paths = [t["path"] for t in tree.json().get("tree", []) if t.get("type") == "blob"]
+    return {"repo": f"{owner}/{repo}", "branch": branch, "file_count": len(paths), "files": paths[:400]}
+
+
+async def _tool_read_file(user_id, repo_url, path, branch=None):
+    token = await _gh_token(user_id)
+    owner, repo = _parse_repo_url(repo_url)
+    branch = branch or await _repo_default_branch(token, owner, repo)
+    r = await _gh(token, "GET", f"/repos/{owner}/{repo}/contents/{path}", params={"ref": branch})
+    data = r.json()
+    if isinstance(data, list) or data.get("type") != "file":
+        return {"error": "That path is a directory, not a file."}
+    raw = base64.b64decode(data["content"].replace("\n", ""))
+    try:
+        text = raw.decode("utf-8")
+    except Exception:
+        return {"error": "Binary file — cannot read as text."}
+    return {"repo": f"{owner}/{repo}", "branch": branch, "path": path, "content": text[:14000]}
+
+
+def _make_push_proposal(repo_url, branch, message, files, create_branch, open_pr):
+    owner, repo = _parse_repo_url(repo_url)
+    clean = [{"path": (f.get("path") or "").lstrip("/"), "content": f.get("content", "")}
+             for f in (files or []) if f.get("path")]
+    return {"repo_url": repo_url, "owner": owner, "repo": repo, "full_name": f"{owner}/{repo}",
+            "branch": branch or "main", "message": message or "Update from Promethius",
+            "files": clean, "create_branch": bool(create_branch), "open_pr": bool(open_pr)}
+
+
+async def _exec_gh_tool(name, args, user_id):
+    try:
+        if name == "list_github_files":
+            return await _tool_list_files(user_id, args.get("repo_url"), args.get("branch"))
+        if name == "read_github_file":
+            return await _tool_read_file(user_id, args.get("repo_url"), args.get("path"), args.get("branch"))
+        if name == "propose_github_push":
+            prop = _make_push_proposal(args.get("repo_url"), args.get("branch"), args.get("message"),
+                                       args.get("files"), args.get("create_branch"), args.get("open_pr"))
+            if not prop["files"]:
+                return {"error": "No files provided to push."}
+            return {"status": "proposal_ready",
+                    "note": "A review dialog will open for the user to approve. Do NOT claim it is pushed yet.",
+                    "proposal": prop}
+    except HTTPException as e:
+        return {"error": str(e.detail)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+    return {"error": "unknown tool"}
+
+
+_GH_TOOLS_OPENAI = [
+    {"type": "function", "function": {
+        "name": "list_github_files", "description": "List all files in a GitHub repository. Call this first when the user asks you to look at / pull / review a repo.",
+        "parameters": {"type": "object", "properties": {
+            "repo_url": {"type": "string", "description": "GitHub repo URL or owner/repo"},
+            "branch": {"type": "string", "description": "Optional branch; defaults to the repo default branch"}},
+            "required": ["repo_url"]}}},
+    {"type": "function", "function": {
+        "name": "read_github_file", "description": "Read the text content of one file in a GitHub repository.",
+        "parameters": {"type": "object", "properties": {
+            "repo_url": {"type": "string"}, "path": {"type": "string", "description": "File path within the repo"},
+            "branch": {"type": "string"}}, "required": ["repo_url", "path"]}}},
+    {"type": "function", "function": {
+        "name": "propose_github_push", "description": "Propose committing/pushing file changes. This does NOT push directly — it opens a review dialog for the user to approve first. Use for any write/commit request.",
+        "parameters": {"type": "object", "properties": {
+            "repo_url": {"type": "string"}, "branch": {"type": "string"}, "message": {"type": "string", "description": "Commit message"},
+            "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
+            "create_branch": {"type": "boolean"}, "open_pr": {"type": "boolean"}},
+            "required": ["repo_url", "message", "files"]}}},
+]
+
+_GH_TOOLS_ANTHROPIC = [
+    {"name": t["function"]["name"], "description": t["function"]["description"], "input_schema": t["function"]["parameters"]}
+    for t in _GH_TOOLS_OPENAI
+]
+
+GH_TOOL_GUIDANCE = (
+    "\n\n=== GITHUB ABILITIES ===\n"
+    "You can actually act on GitHub using these tools: list_github_files, read_github_file, and "
+    "propose_github_push. When the user asks you to pull, open, read, review, analyze, or change a GitHub "
+    "repo, CALL these tools with the repo URL they gave you — do not say you lack access or ask them to paste "
+    "code. For any change/commit, call propose_github_push; it opens a review dialog for the user to approve, "
+    "so never claim something was pushed until they approve. If a tool returns an error that GitHub is not "
+    "connected, tell the user to connect their token via the GitHub button in the chat toolbar.\n"
+    "=== END GITHUB ABILITIES ===\n"
+)
+
+
+async def run_chat_openai_tools(provider, model, system_prompt, history, user_id):
+    clt = openai_client(provider)
+    msgs = [{"role": "system", "content": system_prompt}]
+    msgs += [{"role": m["role"], "content": m["content"]} for m in history]
+    proposal = None
+    for _ in range(6):
+        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=_GH_TOOLS_OPENAI, max_tokens=2048)
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            return (msg.content or ""), proposal
+        msgs.append({"role": "assistant", "content": msg.content or "",
+                     "tool_calls": [tc.model_dump() for tc in msg.tool_calls]})
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except Exception:
+                args = {}
+            result = await _exec_gh_tool(tc.function.name, args, user_id)
+            if tc.function.name == "propose_github_push" and result.get("proposal"):
+                proposal = result["proposal"]
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:8000]})
+    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=1024)
+    return (resp.choices[0].message.content or ""), proposal
+
+
+async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
+    clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    msgs = [{"role": m["role"], "content": m["content"]} for m in history]
+    proposal = None
+    for _ in range(6):
+        resp = await clt.messages.create(model=model, max_tokens=2048, system=system_prompt,
+                                         messages=msgs, tools=_GH_TOOLS_ANTHROPIC)
+        tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
+        if not tool_uses:
+            return "".join(getattr(b, "text", "") for b in resp.content), proposal
+        msgs.append({"role": "assistant", "content": [b.model_dump() for b in resp.content]})
+        results = []
+        for tu in tool_uses:
+            result = await _exec_gh_tool(tu.name, tu.input or {}, user_id)
+            if tu.name == "propose_github_push" and result.get("proposal"):
+                proposal = result["proposal"]
+            results.append({"type": "tool_result", "tool_use_id": tu.id, "content": json.dumps(result)[:8000]})
+        msgs.append({"role": "user", "content": results})
+    resp = await clt.messages.create(model=model, max_tokens=1024, system=system_prompt, messages=msgs)
+    return "".join(getattr(b, "text", "") for b in resp.content), proposal
+
+
 @api_router.get("/models")
 async def models(user=Depends(get_current_user)):
     return PROVIDERS
@@ -784,8 +947,19 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
 
     images, doc_text = await load_attachments(req.attachment_ids)
 
+    push_proposal = None
     try:
-        reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
+        if req.provider in ("openai", "anthropic") and not images:
+            tool_system = system_prompt + GH_TOOL_GUIDANCE
+            hist = history
+            if doc_text:
+                hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
+            if req.provider == "openai":
+                reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid)
+            else:
+                reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
+        else:
+            reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
     except Exception as e:
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")
@@ -801,7 +975,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
 
     asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
-    return {"conversation_id": conv["id"], "reply": reply}
+    return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
 
 
 # ---------------------------------------------------------------------------

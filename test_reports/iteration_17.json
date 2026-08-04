@@ -1,0 +1,54 @@
+{
+  "summary": "GitHub-tool chat integration tested end-to-end in the real UI. READ path works: after connecting the PAT, Promethius (GPT-4o-mini) executed read_github_file and answered '# Here are your Instructions' verbatim. PUSH path partly works: propose_github_push is emitted by the backend, ChatPanel auto-opens GithubPush at the REVIEW step prefilled with branch 'prom-chat-uitest', file 'HELLO_UITEST.md', commit message 'Create HELLO_UITEST.md with greeting', and header shows @rocosfsintec-del. However, clicking 'Approve & Push' fails with HTTP 404 from /api/github/commit -> GitHub GET /git/ref/heads/prom-chat-uitest returned 404. RCA: when the assistant proposes a NEW branch (create_branch=true), the payload only carries the target branch; GithubPush sets repo.default_branch = initialProposal.branch (the NEW branch), so the commit call sends base_branch='prom-chat-uitest' (the branch we're trying to create) instead of the repo's actual default branch ('main'). Approval gate itself is intact: nothing was committed until Approve was clicked.",
+  "ai_feature_verdicts": [
+    "Chat -> GitHub read tool (list/read_github_file via GPT-4o-mini) - pass - evidence: /api/github/token 200, backend httpx GET /repos/rocosfsintec-del/Promethius/contents/README.md?ref=main 200, assistant reply 'The first line of the README.md is:\\n\\n\"# Here are your Instructions\"'. Skill: ai-testing-llm.",
+    "Chat -> propose_github_push auto-opens review dialog - pass - evidence: after 'Create a file HELLO_UITEST.md... on new branch prom-chat-uitest', GithubPush dialog opened automatically at step='review' with header @ROCOSFSINTEC-DEL, banner 'Confirm before pushing rocosfsintec-del/Promethius on branch prom-chat-uitest (new branch)', file HELLO_UITEST.md (1 line, 2 chars), toast 'Promethius prepared a push - review & approve it'. Skill: ai-testing-llm.",
+    "Chat -> approve-and-push commit (real GitHub commit) - fail - evidence: click on [data-testid='github-approve-push'] -> /api/github/commit responded 404. Backend log: 'GET https://api.github.com/repos/rocosfsintec-del/Promethius/git/ref/heads/prom-chat-uitest HTTP/1.1 404 Not Found'. No commit-link ever rendered; no branch created. Skill: ai-testing-llm."
+  ],
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/github/commit (triggered from chat push proposal)",
+        "issue": "When create_branch=true, base_branch sent by the frontend equals the (yet-to-be-created) target branch, so GitHub returns 404 fetching the base ref. Root cause is that the push_proposal from the chat tool does not carry the repo's real default_branch; the FE fills repo.default_branch with initialProposal.branch. Nothing pushes end-to-end from chat-driven proposals for a new branch.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/chat (assistant Markdown rendering)",
+        "issue": "React hydration warning: <pre> cannot be a descendant of <p>. Markdown renderer wraps inline <code> containing a <pre> inside a <p>. Cosmetic (no functional impact) but pollutes console."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Chat -> Push proposal -> Approve & Push",
+        "issue": "GithubPush.jsx useEffect sets repo.default_branch = initialProposal.branch. That value is later used as base_branch when create_branch=true, causing a 404 loop. Fix: backend _make_push_proposal should include the repo's real default_branch (fetch via _repo_default_branch); frontend should map that to repo.default_branch, and initialProposal.branch stays only as the target 'branch'.",
+        "affected_selectors": ["[data-testid=github-approve-push]", "[data-testid=github-commit-link]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_17.json"],
+  "action_items": [
+    "MAIN AGENT: In backend _make_push_proposal (server.py:788), fetch the real repo default_branch via _repo_default_branch(token, owner, repo) and include it as 'default_branch' in the proposal payload.",
+    "MAIN AGENT: In frontend GithubPush.jsx useEffect (line 74-89), set repo.default_branch = initialProposal.default_branch || 'main' (do NOT reuse initialProposal.branch as default_branch). This is the sole change needed to unblock Approve & Push for new branches.",
+    "MAIN AGENT: Consider mapping GitHub 404 responses in /api/github/commit to a friendlier detail (e.g. 'Base branch <x> not found on repo') so the toast surfaces the real problem instead of 'Push failed' with no toast body.",
+    "MAIN AGENT (cosmetic): In Markdown.jsx, avoid wrapping <pre> inside <p>; either render code blocks outside the paragraph tree or use a custom code component that switches to a <div> when it detects a <pre> child. Fixes the console hydration warning."
+  ],
+  "critical_code_review_comments": [
+    "Backend server.py is 1873 lines (exceeds 700-line guideline). Consider splitting github, chat, auth, uploads, files into routers.",
+    "_make_push_proposal returns branch/create_branch but no default_branch. Callers on the FE need both target branch AND base branch to build a valid commit request.",
+    "/api/github/commit does not catch GitHub 4xx errors with a clear message. It relies on _gh() to raise; the frontend then shows a generic 'Push failed' toast with no toast body when the detail comes from a 404 wrapped in HTTPException."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "66%", "frontend": "66%"},
+  "test_credentials": "Bootstrap via POST /api/auth/register with a unique qa_ghchat_<ts>@example.com/Test1234!; token stashed in localStorage['promethius_token']. GitHub PAT used: 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 (rocosfsintec-del).",
+  "seed_data_creation": "One throwaway user per run; one conversation. NO branch was created on GitHub (Approve failed). Nothing to clean up on the repo side.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "STEP 1 auth: register via /api/auth/register -> localStorage.setItem('promethius_token', token) -> /chat. STEP 2 connect PAT: click [data-testid='github-push-button'], WAIT for [data-testid='github-token-input'] (status must resolve first — CSS uppercases the header text so use /rocosfsintec-del/i for wait_for_function). STEP 3 read: send 'Read README.md in https://github.com/rocosfsintec-del/Promethius and quote its first line.' - assistant reply must contain 'Here are your Instructions'. STEP 4 push: send 'Create a file HELLO_UITEST.md containing \"hi\" and push it to https://github.com/rocosfsintec-del/Promethius on a new branch called prom-chat-uitest.' - dialog auto-opens at review with the correct branch/file. STEP 5 approve: click [data-testid='github-approve-push']; expect [data-testid='github-commit-link'] within 60s. CURRENTLY BLOCKED at STEP 5 by the base_branch bug above.",
+  "rca of the issue": "propose_github_push (server.py:788) returns {branch, create_branch, ...} but not default_branch. GithubPush.jsx (line 76-81) stores initialProposal.branch as BOTH repo.default_branch and the target branch. On Approve, the FE sends base_branch = repo.default_branch = 'prom-chat-uitest', and /api/github/commit does GET /repos/{owner}/{repo}/git/ref/heads/prom-chat-uitest which 404s (branch doesn't exist yet - that's what we were about to create). Fix in ONE line each on FE and BE: BE include default_branch in the proposal (fetched via _repo_default_branch); FE map initialProposal.default_branch (fallback 'main') to repo.default_branch."
+}
