@@ -1,0 +1,26 @@
+{
+  "summary": "Chat flow tested end-to-end in the real UI with BOTH providers. GPT-4o mini (default) returned 'ready' and Claude Sonnet 4.6 (after switching via model-selector-trigger -> model-option-claude-sonnet-4-6) returned 'hello'. No sonner error toast, no 401 / authentication_error / 'API key is invalid' anywhere. Curl sanity on /api/chat also passed for both providers. Conclusion: the app code and cloud-workspace keys are healthy; the user's reported 401 is caused solely by their LOCAL backend/.env missing/invalid ANTHROPIC_API_KEY.",
+  "ai_feature_verdicts": [
+    "Chat via OpenAI gpt-4o-mini (PRIMARY) - pass - evidence: UI reply text 'ready' visible in assistant bubble after send-button click; curl POST /api/chat provider=openai returned {\"reply\":\"Ready\"}. Skill: ai-testing-llm.",
+    "Chat via Anthropic claude-sonnet-4-6 - pass - evidence: model selector label switched to 'Claude Sonnet 4.6'; UI reply text 'hello' rendered; curl POST /api/chat provider=anthropic returned {\"reply\":\"Ready\"}. No 401/authentication_error. Skill: ai-testing-llm."
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/test_reports/iteration_16.json"],
+  "action_items": [
+    "Tell the end user: their local Promethius install is missing valid OPENAI_API_KEY / ANTHROPIC_API_KEY in backend/.env. Cloud instance works. Have them paste the same keys locally (or run the local Ollama models which don't need a key) and restart the backend."
+  ],
+  "critical_code_review_comments": [
+    "AsyncAnthropic and openai_client(provider) instantiate a new client on every /api/chat call (server.py:677, 725). Fine functionally, but moving to module-level singletons would save a tiny amount of latency/allocations.",
+    "run_llm swallows nothing for OpenAI errors; Anthropic path logs a '[LOUD] Anthropic API call failed' then re-raises, which is how the user's 401 surfaced to the toast. Consider mapping provider auth errors to a friendlier detail like 'AI provider key missing/invalid' to make local-vs-cloud config problems obvious.",
+    "server.py is 1699 lines; exceeds the 700-line guideline. Consider splitting auth, chat, files, projects into routers."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Bootstrap via /api/auth/register with unique @example.com email; token stored in localStorage['promethius_token'] to bypass passkey UI.",
+  "seed_data_creation": "One throwaway user qa_chat_<timestamp>@example.com per run; one conversation with 2 assistant replies.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Passkey UI can't be automated headlessly; use /api/auth/register + localStorage.setItem('promethius_token', token) then navigate to /chat. Model switch: click [data-testid='model-selector-trigger'] then [data-testid='model-option-<model>']. Assistant reply lands as text inside the last div.animate-fade-up; send-button HTML contains 'animate-spin' while pending.",
+  "rca of the issue": "User's local backend/.env lacks a valid ANTHROPIC_API_KEY. The Anthropic SDK raised authentication_error(401), which server.py:719-721 logs as '[LOUD] Anthropic API call failed' and re-raises; FastAPI converts it into 500 with detail string that the frontend shows via toast 'AI error: Error code: 401 - authentication_error: API key is invalid'. Cloud workspace has a working ANTHROPIC_API_KEY and reproduces cleanly with a reply. Fix: set OPENAI_API_KEY and ANTHROPIC_API_KEY in the user's local /app/backend/.env, restart backend."
+}
