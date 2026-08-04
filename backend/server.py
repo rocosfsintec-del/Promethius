@@ -72,7 +72,7 @@ STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", str(Path(__file__).parent / "st
 PROVIDERS = {
     "openai": ["gpt-4o-mini", "gpt-4o", "gpt-5.5"],
     "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
-    "ollama": ["llama3.1", "mistral", "qwen2.5"],
+    "ollama": ["llama2-uncensored", "llama3.1", "mistral", "qwen2.5"],
 }
 
 PERSONA = (

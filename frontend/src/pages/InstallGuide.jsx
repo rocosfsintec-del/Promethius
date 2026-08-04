@@ -167,8 +167,8 @@ export default function InstallGuide() {
         <Section icon={Cpu} n="5" title="Option A — Run fully offline with Ollama">
           <p className="text-sm text-zinc-500 italic">Skip this section if you only use cloud keys.</p>
           <p>Download Ollama from <code className="text-orange-300">https://ollama.com/download</code> (Windows/macOS/Linux), then pull a model:</p>
-          <CodeBlock code={`ollama pull llama3.1\n# optional alternatives:\nollama pull mistral\nollama pull qwen2.5\n# Ollama serves automatically at http://localhost:11434`} />
-          <p>In the app's model selector, choose provider <b className="text-white">Ollama</b> and the model you pulled. No internet or API key required for chat.</p>
+          <CodeBlock code={`# Uncensored, fully offline (recommended for unrestricted use):\nollama pull llama2-uncensored\n\n# optional alternatives:\nollama pull llama3.1\nollama pull mistral\nollama pull qwen2.5\n# Ollama serves automatically at http://localhost:11434`} />
+          <p>In the app's model selector, choose <b className="text-white">Llama 2 Uncensored (Ollama · offline)</b> (or any model you pulled). No internet or API key required for chat.</p>
           <p className="text-sm text-zinc-400">Note: voice (ElevenLabs), video (fal.ai) and web search (Tavily) still need their cloud keys — they have no offline equivalent.</p>
         </Section>
 

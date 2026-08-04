@@ -15,6 +15,7 @@ const MODEL_LABELS = {
   "claude-sonnet-4-6": "Claude Sonnet 4.6",
   "claude-opus-4-7": "Claude Opus 4.7",
   "claude-haiku-4-5": "Claude Haiku 4.5",
+  "llama2-uncensored": "Llama 2 Uncensored (Ollama · offline)",
   "llama3.1": "Llama 3.1 (Ollama)",
   "mistral": "Mistral (Ollama)",
   "qwen2.5": "Qwen 2.5 (Ollama)",
