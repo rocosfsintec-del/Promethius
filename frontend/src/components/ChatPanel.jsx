@@ -34,6 +34,7 @@ export default function ChatPanel({
   const [recording, setRecording] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [showPush, setShowPush] = useState(false);
+  const [pushProposal, setPushProposal] = useState(null);
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const mediaRef = useRef(null);
@@ -116,6 +117,11 @@ export default function ChatPanel({
         refreshConversations();
       }
       setMessages((m) => [...m, { id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text" }]);
+      if (r.data.push_proposal) {
+        setPushProposal(r.data.push_proposal);
+        setShowPush(true);
+        toast.info("Promethius prepared a push — review & approve it");
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Promethius could not respond");
       setMessages((m) => m.filter((x) => x.id !== optimistic.id));
@@ -385,7 +391,8 @@ export default function ChatPanel({
 
       <GithubPush
         open={showPush}
-        onClose={() => setShowPush(false)}
+        onClose={() => { setShowPush(false); setPushProposal(null); }}
+        initialProposal={pushProposal}
         lastAssistantMessage={[...messages].reverse().find((m) => m.role === "assistant" && m.type !== "image")?.content || ""}
       />
     </div>

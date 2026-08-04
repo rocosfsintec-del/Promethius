@@ -8,12 +8,15 @@ export default function Markdown({ children }) {
         remarkPlugins={[remarkGfm]}
         components={{
           a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-          code: ({ inline, className, children, ...props }) =>
-            inline ? (
-              <code className="md-inline-code" {...props}>{children}</code>
-            ) : (
-              <pre className="md-pre"><code className={className} {...props}>{children}</code></pre>
-            ),
+          pre: ({ children, ...props }) => <pre className="md-pre" {...props}>{children}</pre>,
+          code: ({ className, children, ...props }) => {
+            const isBlock = /language-/.test(className || "");
+            return (
+              <code className={isBlock ? className : "md-inline-code"} {...props}>
+                {children}
+              </code>
+            );
+          },
         }}
       >
         {children || ""}
