@@ -34,3 +34,18 @@ User asked to pull the repo into a fresh workspace and repair it.
 - P1: Chat requires an LLM key (ANTHROPIC_API_KEY / OPENAI_API_KEY) or local Ollama.
 - P1: Push repaired baseline back to existing GitHub repo (no delete needed).
 - P2: Review the self-modification/GitHub feature that caused the break to add guardrails.
+
+## Feature: GitHub Push from chat (2026-08-04)
+- Promethius can now commit & push to any repo the user's PAT can access, from a Push
+  button in the chat toolbar (data-testid='github-push-button').
+- Backend (server.py): POST /api/github/token (validate+store), GET /api/github/status,
+  DELETE /api/github/token, GET /api/github/repos, GET /api/github/file,
+  GET /api/github/self-source, GET /api/github/self-file, POST /api/github/commit
+  (atomic blobs->tree->commit->ref, optional new branch + PR).
+- PAT is encrypted at rest with Fernet (key derived from JWT_SECRET), stored in
+  db.github_config per user, never returned to the client.
+- Frontend (components/GithubPush.jsx): connect -> compose (repo/branch/message/files)
+  -> REVIEW (approval gate; only "Approve & Push" commits) -> done (commit link).
+  Files can come from the last chat reply, Promethius's own source, or blank/manual.
+- Verified: backend curl (real commit created+deleted) and full UI (testing agent, 6/6).
+- Note: uses user-supplied GitHub PAT (repo scope). No new .env var required.
