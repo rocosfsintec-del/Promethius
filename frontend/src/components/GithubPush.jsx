@@ -26,6 +26,28 @@ function extractCodeBlocks(text) {
   return blocks;
 }
 
+// Line-based LCS diff (capped for large files).
+function diffLines(oldStr, newStr) {
+  const a = (oldStr || "").split("\n");
+  const b = (newStr || "").split("\n");
+  const n = a.length, m = b.length;
+  if (n > 700 || m > 700) return null; // too big to diff nicely
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const res = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { res.push({ t: "ctx", v: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { res.push({ t: "del", v: a[i] }); i++; }
+    else { res.push({ t: "add", v: b[j] }); j++; }
+  }
+  while (i < n) res.push({ t: "del", v: a[i++] });
+  while (j < m) res.push({ t: "add", v: b[j++] });
+  return res;
+}
+
 export default function GithubPush({ open, onClose, lastAssistantMessage, initialProposal }) {
   const [status, setStatus] = useState(null); // {connected, login}
   const [tokenInput, setTokenInput] = useState("");
@@ -44,6 +66,9 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
   const [result, setResult] = useState(null);
   const [selfFiles, setSelfFiles] = useState([]);
   const [selfOpen, setSelfOpen] = useState(false);
+  const [diffs, setDiffs] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [expanded, setExpanded] = useState({});
 
   const loadStatus = useCallback(async () => {
     try {
@@ -89,6 +114,29 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
       }
     }
   }, [open, loadStatus, initialProposal]);
+
+  useEffect(() => {
+    if (step !== "review" || !repo || files.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setDiffLoading(true);
+      setDiffs(null);
+      try {
+        const r = await api.post("/github/diff", {
+          owner: repo.owner,
+          repo: repo.name,
+          base_branch: createBranch ? repo.default_branch : branch.trim(),
+          files: files.map((f) => ({ path: f.path.trim(), content: f.content })),
+        });
+        if (!cancelled) setDiffs(r.data);
+      } catch {
+        if (!cancelled) setDiffs([]);
+      } finally {
+        if (!cancelled) setDiffLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, repo, files, branch, createBranch]);
 
   const connect = async () => {
     if (!tokenInput.trim()) return;
@@ -471,17 +519,67 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
               </div>
 
               <div className="space-y-2">
-                {files.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#161619] border border-white/10">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileCode2 size={14} className="text-orange-400 shrink-0" />
-                      <span className="text-sm font-mono text-zinc-200 truncate">{f.path}</span>
+                {files.map((f, i) => {
+                  const d = diffs && diffs.find((x) => x.path === f.path);
+                  const rows = d && d.status !== "binary" ? diffLines(d.old, d.new) : null;
+                  const adds = rows ? rows.filter((r) => r.t === "add").length : f.content.split("\n").length;
+                  const dels = rows ? rows.filter((r) => r.t === "del").length : 0;
+                  const isOpen = expanded[f.path];
+                  return (
+                    <div key={i} className="rounded-xl bg-[#161619] border border-white/10 overflow-hidden">
+                      <button
+                        data-testid={`github-diff-toggle-${i}`}
+                        onClick={() => setExpanded((e) => ({ ...e, [f.path]: !e[f.path] }))}
+                        className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ChevronDown size={14} className={`text-zinc-500 shrink-0 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                          <FileCode2 size={14} className="text-orange-400 shrink-0" />
+                          <span className="text-sm font-mono text-zinc-200 truncate">{f.path}</span>
+                          <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded ml-1 shrink-0 ${
+                            d?.status === "added" ? "bg-green-500/15 text-green-400" : d?.status === "modified" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-400"
+                          }`}>
+                            {d ? d.status : "new"}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-mono shrink-0 ml-3">
+                          <span className="text-green-500">+{adds}</span>{" "}
+                          <span className="text-red-500">−{dels}</span>
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div className="border-t border-white/5 max-h-72 overflow-auto bg-[#0c0c0e]">
+                          {diffLoading && !d ? (
+                            <div className="flex items-center justify-center py-6 text-zinc-600">
+                              <Loader2 size={16} className="animate-spin" />
+                            </div>
+                          ) : rows ? (
+                            <pre className="text-[11px] font-mono leading-relaxed py-1">
+                              {rows.map((r, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`px-3 whitespace-pre-wrap break-all ${
+                                    r.t === "add" ? "bg-green-500/10 text-green-300" :
+                                    r.t === "del" ? "bg-red-500/10 text-red-300" : "text-zinc-500"
+                                  }`}
+                                >
+                                  <span className="select-none opacity-60 mr-2">{r.t === "add" ? "+" : r.t === "del" ? "−" : " "}</span>
+                                  {r.v || " "}
+                                </div>
+                              ))}
+                            </pre>
+                          ) : (
+                            <pre className="text-[11px] font-mono text-green-300 leading-relaxed py-1 px-3 whitespace-pre-wrap break-all">
+                              {(d?.new ?? f.content).split("\n").map((ln, idx) => (
+                                <div key={idx}><span className="select-none opacity-60 mr-2">+</span>{ln || " "}</div>
+                              ))}
+                            </pre>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-[11px] font-mono text-zinc-600 shrink-0 ml-3">
-                      {f.content.split("\n").length} lines · {f.content.length} chars
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="flex items-center justify-between pt-2">
