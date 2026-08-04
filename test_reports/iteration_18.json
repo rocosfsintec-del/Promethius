@@ -1,0 +1,35 @@
+{
+  "summary": "RETEST PASSED. The prior base_branch=404 bug on chat->GitHub push (iteration_17) is FIXED. Full chat->push flow now works end-to-end from the real UI: (1) Connect PAT via GithubPush dialog -> header 'Connected as rocosfsintec-del'. (2) Ask Promethius (GPT-4o-mini) to create HELLO_UITEST2.md 'hi' and push to a NEW branch prom-chat-uitest2 on rocosfsintec-del/Promethius -> tool-call propose_github_push emitted -> GithubPush dialog AUTO-OPENED at step='review' with branch prom-chat-uitest2 (new branch), file HELLO_UITEST2.md, message 'Create HELLO_UITEST2.md with greeting'. (3) Click Approve & Push -> POST /api/github/commit returned 200 with real commit_sha ee3d6dc606e9c43a1750813638393459b22a0a05, commit_url and PR #2 -> UI rendered [data-testid=github-commit-link] with href https://github.com/rocosfsintec-del/Promethius/commit/ee3d6dc606e9c43a1750813638393459b22a0a05 and 'Pushed to GitHub' toast. Regression READ path also PASSED: 'Read README.md ... and quote its first line' -> assistant replied 'The first line of the README.md is: \"# Here are your Instructions\"' rendered in chat.",
+  "ai_feature_verdicts": [
+    "Chat -> GitHub read tool (read_github_file via GPT-4o-mini) - pass - evidence: rendered assistant text 'The first line of the README.md is: \"# Here are your Instructions\"' in chat UI after user prompt. Skill: ai-testing-llm.",
+    "Chat -> propose_github_push auto-opens review dialog - pass - evidence: after prompt 'Create a file HELLO_UITEST2.md ... prom-chat-uitest2', GithubPush dialog opened automatically at step='review' with header @ROCOSFSINTEC-DEL, banner 'Confirm before pushing rocosfsintec-del/Promethius on branch prom-chat-uitest2 (new branch)', file HELLO_UITEST2.md (1 lines, 2 chars), toast 'Promethius prepared a push - review & approve it'. Skill: ai-testing-llm.",
+    "Chat -> approve-and-push commit (real GitHub commit on new branch) - pass - evidence: click [data-testid='github-approve-push'] -> POST /api/github/commit -> HTTP 200 body {\"commit_sha\":\"ee3d6dc606e9c43a1750813638393459b22a0a05\",\"branch\":\"prom-chat-uitest2\",\"commit_url\":\"https://github.com/rocosfsintec-del/Promethius/commit/ee3d6dc606e9c43a1750813638393459b22a0a05\",\"pr_url\":\"https://github.com/rocosfsintec-del/Promethius/pull/2\",\"pr_number\":2}; UI showed [data-testid=github-commit-link] with matching href and 'View commit' text; 'Pushed to GitHub' toast. Skill: ai-testing-llm."
+  ],
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/chat (assistant Markdown rendering)", "issue": "Existing React hydration warning still present: '<pre> cannot be a descendant of <p>'. Cosmetic only; not blocking. Not fixed in this iteration."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_18.json"],
+  "action_items": [
+    "CLEANUP (main agent or repo owner): the successful push created branch 'prom-chat-uitest2' on rocosfsintec-del/Promethius and opened PR #2 (https://github.com/rocosfsintec-del/Promethius/pull/2, commit ee3d6dc606e9c43a1750813638393459b22a0a05). Delete the branch and close the PR when done.",
+    "OPTIONAL (cosmetic): still worth fixing the Markdown '<pre> inside <p>' hydration warning in Markdown.jsx as noted in iteration_17."
+  ],
+  "critical_code_review_comments": [
+    "Fix is minimal and correct: server.py sets prop['default_branch'] = await _repo_default_branch(...) after building the proposal (server.py:809), and GithubPush.jsx maps initialProposal.default_branch (fallback 'main') to repo.default_branch (line 79). The base_branch for new-branch commits is now the repo's real default_branch and /api/github/commit succeeds."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Bootstrap via POST /api/auth/register with qa_ghchat2_<ts>@example.com / Test1234!; token stashed in localStorage['promethius_token']. GitHub PAT used: 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 (rocosfsintec-del).",
+  "seed_data_creation": "Two throwaway users this run (one for push flow, one for read regression). ONE real GitHub side effect: commit ee3d6dc606e9c43a1750813638393459b22a0a05 on new branch prom-chat-uitest2 in rocosfsintec-del/Promethius, plus auto-opened PR #2. To clean up: `git push origin --delete prom-chat-uitest2` (or use GitHub UI) and close PR #2.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Everything in the previously-failing chat->GitHub push path is green. Skills loaded: ai-testing-core, ai-testing-llm. If retesting again, either target a new branch name (prom-chat-uitest3, etc.) or ensure the previous branch is deleted first, otherwise the same POST will 422 on 'branch already exists'.",
+  "rca of the issue": "Fixed in iteration_18 (this run). BE server.py _exec_gh_tool propose_github_push now attaches prop['default_branch'] = await _repo_default_branch(token, owner, repo) (server.py:809). FE GithubPush.jsx useEffect maps initialProposal.default_branch (fallback 'main') to repo.default_branch (line 79). On Approve with create_branch=true, base_branch is now the real repo default ('main'), so GitHub GET /repos/{owner}/{repo}/git/ref/heads/main returns 200 and the commit proceeds. Verified with a real commit."
+}

@@ -805,6 +805,8 @@ async def _exec_gh_tool(name, args, user_id):
                                        args.get("files"), args.get("create_branch"), args.get("open_pr"))
             if not prop["files"]:
                 return {"error": "No files provided to push."}
+            token = await _gh_token(user_id)
+            prop["default_branch"] = await _repo_default_branch(token, prop["owner"], prop["repo"])
             return {"status": "proposal_ready",
                     "note": "A review dialog will open for the user to approve. Do NOT claim it is pushed yet.",
                     "proposal": prop}
@@ -1775,7 +1777,12 @@ async def gh_commit(req: GithubCommitReq, user=Depends(get_current_user)):
     owner, repo = req.owner, req.repo
     base = req.base_branch or req.branch
 
-    ref = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/ref/heads/{base}")
+    try:
+        ref = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/ref/heads/{base}")
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=400, detail=f"Base branch '{base}' not found in {owner}/{repo}.")
+        raise
     base_sha = ref.json()["object"]["sha"]
 
     if req.create_branch and req.branch != base:

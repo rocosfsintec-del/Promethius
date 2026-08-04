@@ -76,7 +76,7 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
           full_name: initialProposal.full_name,
           owner: initialProposal.owner,
           name: initialProposal.repo,
-          default_branch: initialProposal.branch,
+          default_branch: initialProposal.default_branch || "main",
         });
         setBranch(initialProposal.branch || "main");
         setMessage(initialProposal.message || "Update from Promethius");
