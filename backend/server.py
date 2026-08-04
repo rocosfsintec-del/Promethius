@@ -1025,6 +1025,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
                 "attachment_ids": req.attachment_ids, "created_at": ts.isoformat()}
     ai_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
               "role": "assistant", "content": reply, "type": "text",
+              "push_proposal": push_proposal,
               "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
     await db.messages.insert_many([user_msg, ai_msg])
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})

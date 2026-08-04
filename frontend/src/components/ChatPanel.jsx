@@ -262,10 +262,10 @@ export default function ChatPanel({
                           >
                             ▶ Speak
                           </button>
-                          {m.pushProposal && (
+                          {(m.pushProposal || m.push_proposal) && (
                             <button
                               data-testid="review-push-button"
-                              onClick={() => { setPushProposal(m.pushProposal); setShowPush(true); }}
+                              onClick={() => { setPushProposal(m.pushProposal || m.push_proposal); setShowPush(true); }}
                               className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20 hover:bg-orange-500/20 transition-colors"
                             >
                               <Github size={12} /> Review &amp; Push
