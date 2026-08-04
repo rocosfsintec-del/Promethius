@@ -14,7 +14,10 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import jwt
+import hashlib as _hashlib_top
+import httpx
 import requests
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -43,6 +46,8 @@ db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev_secret')
 JWT_ALGO = 'HS256'
+# Deterministic Fernet key derived from JWT_SECRET — used to encrypt stored GitHub PATs at rest.
+_gh_fernet = Fernet(base64.urlsafe_b64encode(_hashlib_top.sha256(("ghpat::" + JWT_SECRET).encode()).digest()))
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
@@ -1433,6 +1438,198 @@ async def admin_users(user=Depends(require_admin)):
 @api_router.get("/")
 async def root():
     return {"message": "Promethius API online"}
+
+
+# ---------------------------------------------------------------------------
+# GitHub integration — Promethius can commit & push to a repo (user-approved)
+# ---------------------------------------------------------------------------
+APP_ROOT = ROOT_DIR.parent  # /app — Promethius's own source tree
+GH_API = "https://api.github.com"
+GH_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "Promethius"}
+_SELF_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".css", ".json", ".md", ".html", ".txt"}
+
+
+class GithubTokenReq(BaseModel):
+    token: str
+
+
+class GhFile(BaseModel):
+    path: str
+    content: str
+
+
+class GithubCommitReq(BaseModel):
+    owner: str
+    repo: str
+    branch: str
+    message: str
+    files: List[GhFile]
+    base_branch: Optional[str] = None
+    create_branch: bool = False
+    open_pr: bool = False
+    pr_title: Optional[str] = None
+    pr_body: Optional[str] = None
+
+
+async def _gh_token(user_id: str) -> str:
+    doc = await db.github_config.find_one({"user_id": user_id})
+    if not doc:
+        raise HTTPException(status_code=400, detail="GitHub is not connected. Add a personal access token first.")
+    return _gh_fernet.decrypt(doc["token_enc"].encode()).decode()
+
+
+async def _gh(token: str, method: str, path: str, **kwargs):
+    async with httpx.AsyncClient(base_url=GH_API, timeout=30) as c:
+        r = await c.request(method, path, headers={**GH_HEADERS, "Authorization": f"Bearer {token}"}, **kwargs)
+    if r.status_code >= 400:
+        try:
+            msg = r.json().get("message", r.text)
+        except Exception:
+            msg = r.text[:200]
+        raise HTTPException(status_code=r.status_code, detail=f"GitHub: {msg}")
+    return r
+
+
+@api_router.post("/github/token")
+async def gh_set_token(req: GithubTokenReq, user=Depends(get_current_user)):
+    token = req.token.strip()
+    if len(token) < 20:
+        raise HTTPException(status_code=400, detail="That doesn't look like a valid token.")
+    r = await _gh(token, "GET", "/user")  # validate before saving
+    login = r.json().get("login")
+    await db.github_config.update_one(
+        {"user_id": user["id"]},
+        {"$set": {"user_id": user["id"], "token_enc": _gh_fernet.encrypt(token.encode()).decode(),
+                  "login": login, "updated_at": now_iso()}},
+        upsert=True)
+    return {"connected": True, "login": login}
+
+
+@api_router.get("/github/status")
+async def gh_status(user=Depends(get_current_user)):
+    doc = await db.github_config.find_one({"user_id": user["id"]}, {"_id": 0, "token_enc": 0})
+    if not doc:
+        return {"connected": False}
+    return {"connected": True, "login": doc.get("login")}
+
+
+@api_router.delete("/github/token")
+async def gh_disconnect(user=Depends(get_current_user)):
+    await db.github_config.delete_one({"user_id": user["id"]})
+    return {"ok": True}
+
+
+@api_router.get("/github/repos")
+async def gh_repos(user=Depends(get_current_user)):
+    token = await _gh_token(user["id"])
+    r = await _gh(token, "GET", "/user/repos", params={
+        "affiliation": "owner,collaborator,organization_member", "sort": "updated", "per_page": 100})
+    return [{"full_name": x["full_name"], "owner": x["owner"]["login"], "name": x["name"],
+             "private": x["private"], "default_branch": x["default_branch"]} for x in r.json()]
+
+
+@api_router.get("/github/file")
+async def gh_read_file(owner: str, repo: str, path: str, branch: str, user=Depends(get_current_user)):
+    token = await _gh_token(user["id"])
+    try:
+        r = await _gh(token, "GET", f"/repos/{owner}/{repo}/contents/{path}", params={"ref": branch})
+    except HTTPException as e:
+        if e.status_code == 404:
+            return {"exists": False, "content": ""}
+        raise
+    data = r.json()
+    if isinstance(data, list) or data.get("type") != "file":
+        raise HTTPException(status_code=400, detail="That path is a directory, not a file.")
+    raw = base64.b64decode(data["content"].replace("\n", ""))
+    try:
+        text = raw.decode("utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Binary files are not supported here.")
+    return {"exists": True, "sha": data["sha"], "content": text}
+
+
+@api_router.get("/github/self-source")
+async def gh_self_source(user=Depends(get_current_user)):
+    """List Promethius's own editable source files so it can push changes to itself."""
+    files = []
+    for base in ["backend", "frontend/src"]:
+        root = APP_ROOT / base
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if not p.is_file() or p.suffix not in _SELF_SUFFIXES:
+                continue
+            parts = set(p.parts)
+            if "node_modules" in parts or "__pycache__" in parts or "build" in parts:
+                continue
+            files.append(str(p.relative_to(APP_ROOT)))
+    return {"files": sorted(files)[:800]}
+
+
+@api_router.get("/github/self-file")
+async def gh_self_file(path: str, user=Depends(get_current_user)):
+    """Read one of Promethius's own source files (path-traversal guarded)."""
+    root = APP_ROOT.resolve()
+    target = (APP_ROOT / path).resolve()
+    if not str(target).startswith(str(root)) or not target.is_file():
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    try:
+        content = target.read_text(encoding="utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot read that file as text.")
+    return {"path": path, "content": content}
+
+
+@api_router.post("/github/commit")
+async def gh_commit(req: GithubCommitReq, user=Depends(get_current_user)):
+    if not req.files:
+        raise HTTPException(status_code=400, detail="No files to push.")
+    for f in req.files:
+        clean = f.path.lstrip("/")
+        if ".." in clean.split("/"):
+            raise HTTPException(status_code=400, detail=f"Invalid path: {f.path}")
+    token = await _gh_token(user["id"])
+    owner, repo = req.owner, req.repo
+    base = req.base_branch or req.branch
+
+    ref = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/ref/heads/{base}")
+    base_sha = ref.json()["object"]["sha"]
+
+    if req.create_branch and req.branch != base:
+        try:
+            await _gh(token, "POST", f"/repos/{owner}/{repo}/git/refs",
+                      json={"ref": f"refs/heads/{req.branch}", "sha": base_sha})
+        except HTTPException as e:
+            if e.status_code != 422:  # 422 = branch already exists
+                raise
+
+    commit_obj = await _gh(token, "GET", f"/repos/{owner}/{repo}/git/commits/{base_sha}")
+    base_tree = commit_obj.json()["tree"]["sha"]
+
+    tree = []
+    for f in req.files:
+        blob = await _gh(token, "POST", f"/repos/{owner}/{repo}/git/blobs",
+                         json={"content": base64.b64encode(f.content.encode()).decode(), "encoding": "base64"})
+        tree.append({"path": f.path.lstrip("/"), "mode": "100644", "type": "blob", "sha": blob.json()["sha"]})
+
+    new_tree = await _gh(token, "POST", f"/repos/{owner}/{repo}/git/trees",
+                         json={"base_tree": base_tree, "tree": tree})
+    commit = await _gh(token, "POST", f"/repos/{owner}/{repo}/git/commits",
+                       json={"message": req.message, "tree": new_tree.json()["sha"], "parents": [base_sha]})
+    new_sha = commit.json()["sha"]
+    await _gh(token, "PATCH", f"/repos/{owner}/{repo}/git/refs/heads/{req.branch}",
+              json={"sha": new_sha, "force": False})
+
+    result = {"commit_sha": new_sha, "branch": req.branch,
+              "commit_url": f"https://github.com/{owner}/{repo}/commit/{new_sha}"}
+    if req.open_pr and req.branch != base:
+        pr = await _gh(token, "POST", f"/repos/{owner}/{repo}/pulls",
+                       json={"title": req.pr_title or req.message, "body": req.pr_body or "",
+                             "head": req.branch, "base": base})
+        result["pr_url"] = pr.json().get("html_url")
+        result["pr_number"] = pr.json().get("number")
+    return result
 
 
 app.include_router(api_router)

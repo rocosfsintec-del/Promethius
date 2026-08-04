@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Send, Mic, Square, Paperclip, Globe, Image as ImageIcon, Loader2,
-  Flame, X, FileText,
+  Flame, X, FileText, Github,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import Markdown from "./Markdown";
+import GithubPush from "./GithubPush";
 
 const MODEL_LABELS = {
   "gpt-4o-mini": "GPT-4o mini",
@@ -31,6 +32,7 @@ export default function ChatPanel({
   const [attachments, setAttachments] = useState([]);
   const [recording, setRecording] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [showPush, setShowPush] = useState(false);
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const mediaRef = useRef(null);
@@ -321,6 +323,14 @@ export default function ChatPanel({
             >
               <ImageIcon size={18} strokeWidth={1.5} />
             </button>
+            <button
+              data-testid="github-push-button"
+              onClick={() => setShowPush(true)}
+              className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
+              title="Push to GitHub"
+            >
+              <Github size={18} strokeWidth={1.5} />
+            </button>
           </div>
           <textarea
             data-testid="chat-input-textarea"
@@ -370,6 +380,12 @@ export default function ChatPanel({
           handleFiles(Array.from(e.target.files));
           e.target.value = "";
         }}
+      />
+
+      <GithubPush
+        open={showPush}
+        onClose={() => setShowPush(false)}
+        lastAssistantMessage={[...messages].reverse().find((m) => m.role === "assistant" && m.type !== "image")?.content || ""}
       />
     </div>
   );
