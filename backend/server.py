@@ -1048,6 +1048,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
 
     history_docs = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", 1).to_list(500)
     history = [{"role": m["role"], "content": m["content"]} for m in history_docs]
+    history.append({"role": "user", "content": req.message})
 
     summary = await get_or_create_conversation_summary(conv["id"], history)
     system_prompt = await build_system_prompt(uid, req.speaker)
