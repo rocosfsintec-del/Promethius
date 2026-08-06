@@ -1081,7 +1081,6 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
         system_prompt += "\n\n(Note: web search is not yet configured by the admin.)"
 
     images, doc_text = await load_attachments(req.attachment_ids)
-
     push_proposal = None
     try:
         if req.provider in ("openai", "anthropic") and not images:
@@ -1103,8 +1102,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
                 reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
         else:
             reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
-    
-except Exception as e:
+    except Exception as e:
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")
 
