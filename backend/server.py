@@ -1106,7 +1106,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")
 
-    ts = datetime.now(timezone.utc)
+        ts = datetime.now(timezone.utc)
         user_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
                     "role": "user", "content": req.message, "type": "text",
                     "attachment_ids": req.attachment_ids, "created_at": ts.isoformat()}
