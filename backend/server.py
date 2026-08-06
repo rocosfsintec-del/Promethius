@@ -1115,9 +1115,9 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
               "push_proposal": push_proposal,
               "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
     await db.messages.insert_many([user_msg, ai_msg])
-    await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
+        await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
 
-    asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
+        asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
         asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
         return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
 
