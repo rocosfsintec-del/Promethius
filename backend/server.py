@@ -781,7 +781,7 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
         try:
             resp = await clt.messages.create(
                 model=model,
-                max_tokens=2048,
+                max_tokens=8192,
                 system=system_prompt,
                 messages=msgs
             )
@@ -802,7 +802,7 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
         msgs.append({"role": "user", "content": content})
     else:
         msgs.append({"role": "user", "content": user_text})
-    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=2048)
+    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192)
     return resp.choices[0].message.content
 
 
@@ -955,7 +955,7 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
     msgs += [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
     for _ in range(6):
-        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=_GH_TOOLS_OPENAI, max_tokens=2048)
+        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=_GH_TOOLS_OPENAI, max_tokens=8192)
         msg = resp.choices[0].message
         if not msg.tool_calls:
             return (msg.content or ""), proposal
@@ -975,7 +975,7 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
                 slim = {k: v for k, v in result.items() if k != "note"}
                 tool_content = json.dumps(slim)
             msgs.append({"role": "tool", "tool_call_id": tc.id, "content": tool_content})
-    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=1024)
+    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192)
     return (resp.choices[0].message.content or ""), proposal
 
 async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
@@ -983,7 +983,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     msgs = [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
     for _ in range(6):
-        resp = await clt.messages.create(model=model, max_tokens=2048, system=system_prompt,
+        resp = await clt.messages.create(model=model, max_tokens=8192, system=system_prompt,
                                          messages=msgs, tools=_GH_TOOLS_ANTHROPIC)
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
         if not tool_uses:
@@ -1001,7 +1001,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
                 tool_content = json.dumps(slim)
             results.append({"type": "tool_result", "tool_use_id": tu.id, "content": tool_content})
         msgs.append({"role": "user", "content": results})
-    resp = await clt.messages.create(model=model, max_tokens=1024, system=system_prompt, messages=msgs)
+    resp = await clt.messages.create(model=model, max_tokens=8192, system=system_prompt, messages=msgs)
     return "".join(getattr(b, "text", "") for b in resp.content), proposal
 
 
