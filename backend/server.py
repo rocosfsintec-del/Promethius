@@ -900,10 +900,14 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
             result = await _exec_gh_tool(tc.function.name, args, user_id)
             if tc.function.name == "propose_github_push" and result.get("proposal"):
                 proposal = result["proposal"]
-            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:8000]})
+            tool_content = json.dumps(result)
+            if len(tool_content) > 40000 and "proposal" in result:
+                # Keep the full proposal, drop only the long note if needed
+                slim = {k: v for k, v in result.items() if k != "note"}
+                tool_content = json.dumps(slim)
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": tool_content})
     resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=1024)
     return (resp.choices[0].message.content or ""), proposal
-
 
 async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
@@ -921,7 +925,12 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
             result = await _exec_gh_tool(tu.name, tu.input or {}, user_id)
             if tu.name == "propose_github_push" and result.get("proposal"):
                 proposal = result["proposal"]
-            results.append({"type": "tool_result", "tool_use_id": tu.id, "content": json.dumps(result)[:8000]})
+            tool_content = json.dumps(result)
+            if len(tool_content) > 40000 and "proposal" in result:
+                # Keep the full proposal, drop only the long note if needed
+                slim = {k: v for k, v in result.items() if k != "note"}
+                tool_content = json.dumps(slim)
+            results.append({"type": "tool_result", "tool_use_id": tu.id, "content": tool_content})
         msgs.append({"role": "user", "content": results})
     resp = await clt.messages.create(model=model, max_tokens=1024, system=system_prompt, messages=msgs)
     return "".join(getattr(b, "text", "") for b in resp.content), proposal

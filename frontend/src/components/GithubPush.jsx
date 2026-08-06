@@ -7,22 +7,53 @@ import { toast } from "sonner";
 import api from "../lib/api";
 
 // Extract ```lang\ncode``` blocks from an assistant message.
+// Also supports common path comments the model writes.
 function extractCodeBlocks(text) {
   if (!text) return [];
   const blocks = [];
   const re = /```([\w.\-/]*)\n([\s\S]*?)```/g;
   let m;
   let i = 0;
+
   while ((m = re.exec(text)) !== null) {
     const hint = (m[1] || "").trim();
-    const code = m[2];
-    // If the first line is a path comment (// path:, # path:, /* path */), use it.
-    const firstLine = code.split("\n")[0].trim();
-    const pathMatch = firstLine.match(/(?:\/\/|#|<!--|\/\*)\s*(?:path:)?\s*([\w.\-/]+\.\w+)/i);
-    let path = pathMatch ? pathMatch[1] : "";
-    if (!path && hint.includes(".")) path = hint; // sometimes the lang hint is a filename
-    blocks.push({ path: path || `snippet-${++i}.txt`, content: code });
+    let code = m[2];
+
+    // Try to find a path from the first line of the code block
+    const lines = code.split("\n");
+    const firstLine = (lines[0] || "").trim();
+
+    let path = "";
+
+    // Common patterns the model uses:
+    // // path: src/foo.js
+    // # path: src/foo.py
+    // <!-- path: ... -->
+    // /* path: ... */
+    // filename: src/foo.js
+    // File: src/foo.js
+    const pathMatch = firstLine.match(
+      /^(?:\/\/|#|<!--|\/\*)\s*(?:path|file|filename)?\s*[:=]?\s*([\w.\-\/]+\.\w+)/i
+    ) || firstLine.match(
+      /^(?:path|file|filename)\s*[:=]\s*([\w.\-\/]+\.\w+)/i
+    );
+
+    if (pathMatch) {
+      path = pathMatch[1];
+      // Remove the path comment line from the content
+      code = lines.slice(1).join("\n").replace(/^\n/, "");
+    } else if (hint.includes(".")) {
+      // Sometimes the language hint is actually a filename
+      path = hint;
+    }
+
+    if (!path) {
+      path = `snippet-${++i}.txt`;
+    }
+
+    blocks.push({ path, content: code });
   }
+
   return blocks;
 }
 
