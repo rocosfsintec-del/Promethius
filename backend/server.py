@@ -569,6 +569,140 @@ def openai_client(provider: str):
         return AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)
     return AsyncOpenAI(api_key=OPENAI_API_KEY)
 
+async def get_or_create_conversation_summary(conv_id: str, history: list) -> str:
+    """Return a short rolling summary of the conversation so far."""
+    if len(history) < 8:
+        return ""  # too short to summarize
+
+async def get_or_create_conversation_summary(conv_id: str, history: list) -> str:
+    """Return a short rolling summary of the conversation so far."""
+    if len(history) < 8:
+        return ""  # too short to summarize
+
+    # Try to load existing summary
+    conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0, "summary": 1})
+    existing_summary = (conv or {}).get("summary") or ""
+
+    # Only regenerate every ~12 messages to save cost
+    if existing_summary and len(history) % 12 != 0:
+        return existing_summary
+
+    try:
+        recent = history[-16:]  # last 16 messages
+        text = "\n".join(f"{m['role'].upper()}: {m['content'][:400]}" for m in recent)
+        sys_p = (
+            "You write very short conversation summaries (3-6 bullet points max). "
+            "Capture: current goal, important decisions, open tasks, and key context. "
+            "Be extremely concise. Return only the summary text."
+        )
+        summary = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": text}])
+        summary = (summary or "").strip()[:1200]
+        if summary:
+            await db.conversations.update_one(
+                {"id": conv_id},
+                {"$set": {"summary": summary, "summary_updated_at": now_iso()}}
+            )
+            return summary
+    except Exception as e:
+        logger.error(f"summary error: {e}")
+
+    return existing_summary
+
+
+async def update_session_goal(conv_id: str, user_msg: str, ai_reply: str):
+    """Extract and store the current working goal/session state for this conversation."""
+    try:
+        sys_p = (
+            "From the latest exchange, extract the user's CURRENT GOAL or what they are actively working on right now. "
+            "Return a single short sentence (max 20 words). "
+            "If there is no clear ongoing goal, return an empty string."
+        )
+        prompt = f"User: {user_msg}\nAssistant: {ai_reply}\n\nCurrent goal:"
+        goal = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
+        goal = (goal or "").strip()[:200]
+        if goal and goal.lower() not in ("", "none", "n/a", "no clear goal"):
+            await db.conversations.update_one(
+                {"id": conv_id},
+                {"$set": {"current_goal": goal, "goal_updated_at": now_iso()}}
+            )
+    except Exception as e:
+        logger.error(f"session goal error: {e}")
+            )
+            return summary
+    except Exception as e:
+        logger.error(f"summary error: {e}")
+
+    return existing_summary
+
+
+async def update_session_goal(conv_id: str, user_msg: str, ai_reply: str):
+    """Extract and store the current working goal/session state for this conversation."""
+    try:
+        sys_p = (
+            "From the latest exchange, extract the user's CURRENT GOAL or what they are actively working on right now. "
+            "Return a single short sentence (max 20 words). "
+            "If there is no clear ongoing goal, return an empty string."
+        )
+        prompt = f"User: {user_msg}\nAssistant: {ai_reply}\n\nCurrent goal:"
+        goal = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
+        goal = (goal or "").strip()[:200]
+        if goal and goal.lower() not in ("", "none", "n/a", "no clear goal"):
+            await db.conversations.update_one(
+                {"id": conv_id},
+                {"$set": {"current_goal": goal, "goal_updated_at": now_iso()}}
+            )
+    except Exception as e:
+        logger.error(f"session goal error: {e}")
+            )
+    except Exception as e:
+        logger.error(f"session goal error: {e}")
+
+    # Try to load existing summary
+    conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0, "summary": 1})
+    existing_summary = (conv or {}).get("summary") or ""
+
+    # Only regenerate every ~12 messages to save cost
+    if existing_summary and len(history) % 12 != 0:
+        return existing_summary
+
+    try:
+        recent = history[-16:]  # last 16 messages
+        text = "\n".join(f"{m['role'].upper()}: {m['content'][:400]}" for m in recent)
+        sys_p = (
+            "You write very short conversation summaries (3-6 bullet points max). "
+            "Capture: current goal, important decisions, open tasks, and key context. "
+            "Be extremely concise. Return only the summary text."
+        )
+        summary = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": text}])
+        summary = (summary or "").strip()[:1200]
+        if summary:
+            await db.conversations.update_one(
+                {"id": conv_id},
+                {"$set": {"summary": summary, "summary_updated_at": now_iso()}}
+            )
+            return summary
+    except Exception as e:
+        logger.error(f"summary error: {e}")
+
+    return existing_summary
+async def update_session_goal(conv_id: str, user_msg: str, ai_reply: str):
+    """Extract and store the current working goal/session state for this conversation."""
+    try:
+        sys_p = (
+            "From the latest exchange, extract the user's CURRENT GOAL or what they are actively working on right now. "
+            "Return a single short sentence (max 20 words). "
+            "If there is no clear ongoing goal, return an empty string."
+        )
+        prompt = f"User: {user_msg}\nAssistant: {ai_reply}\n\nCurrent goal:"
+        goal = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
+        goal = (goal or "").strip()[:200]
+        if goal and goal.lower() not in ("", "none", "n/a", "no clear goal"):
+            await db.conversations.update_one(
+                {"id": conv_id},
+                {"$set": {"current_goal": goal, "goal_updated_at": now_iso()}}
+            )
+    except Exception as e:
+        logger.error(f"session goal error: {e}")
 
 async def build_system_prompt(user_id: str, speaker: Optional[str] = None):
     udoc = await db.users.find_one({"id": user_id}, {"_id": 0, "directives": 1})
@@ -588,7 +722,7 @@ async def build_system_prompt(user_id: str, speaker: Optional[str] = None):
 
 
 async def extract_and_store_memory(user_id: str, user_msg: str, ai_reply: str, speaker: Optional[str] = None):
-    """Auto long-term memory: extract durable facts and store them (per speaker)."""
+    """Auto long-term memory: extract durable facts and ongoing work context."""
     try:
         scope_q = {"user_id": user_id, "speaker": speaker} if speaker else \
             {"user_id": user_id, "$or": [{"speaker": {"$in": [None, ""]}}, {"speaker": {"$exists": False}}]}
@@ -596,25 +730,36 @@ async def extract_and_store_memory(user_id: str, user_msg: str, ai_reply: str, s
         if len(existing) > 400:
             return
         existing_text = [e["content"].lower() for e in existing]
+
         subject = f"the person named {speaker}" if speaker else "the USER (the owner)"
-        sys_p = (f"Extract durable, personal facts about {subject} worth remembering long-term "
-                 "(identity, preferences, goals, relationships, important ongoing context). "
-                 "Ignore trivia and one-off requests. Return ONLY a JSON array of short fact strings. "
-                 "If there is nothing worth remembering, return [].")
+        sys_p = (
+            f"Extract durable facts about {subject} worth remembering long-term. "
+            "Include: identity, preferences, goals, relationships, AND important ongoing projects or active work. "
+            "Ignore trivia and one-off requests. "
+            "Return ONLY a JSON array of short fact strings. "
+            "If there is nothing worth remembering, return []."
+        )
         prompt = f"They said: {user_msg}\nAssistant replied: {ai_reply}\n\nReturn a JSON array of NEW durable facts about {subject}."
         out = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
-        match = re.search(r"\[.*\]", out, re.S)
+        match = re.search(r"\[.*\]", out or "", re.S)
         facts = json.loads(match.group(0)) if match else []
+
         for f in facts:
             if not isinstance(f, str):
                 continue
             fl = f.strip().lower()
             if fl and fl not in existing_text and not any(fl in e or e in fl for e in existing_text):
-                await db.memories.insert_one({"id": str(uuid.uuid4()), "user_id": user_id, "speaker": speaker,
-                                              "content": f.strip()[:300], "auto": True, "created_at": now_iso()})
+                await db.memories.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "speaker": speaker,
+                    "content": f.strip()[:300],
+                    "auto": True,
+                    "created_at": now_iso()
+                })
                 existing_text.append(fl)
     except Exception as e:
-        logger.error(f"auto-memory error {e}")
+        logger.error(f"auto-memory error: {e}")
 
 
 def tavily_search(query: str):
@@ -977,11 +1122,20 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
         }
         await db.conversations.insert_one(dict(conv))
 
-    history_docs = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    history_docs = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", 1).to_list(500)
     history = [{"role": m["role"], "content": m["content"]} for m in history_docs]
-    history.append({"role": "user", "content": req.message})
 
+    summary = await get_or_create_conversation_summary(conv["id"], history)
     system_prompt = await build_system_prompt(uid, req.speaker)
+    if summary:
+        system_prompt += f"\n\n=== CURRENT CONVERSATION SUMMARY ===\n{summary}\n=== END SUMMARY ===\n"
+
+    # Inject current session goal
+    conv_doc = await db.conversations.find_one({"id": conv["id"]}, {"_id": 0, "current_goal": 1})
+    current_goal = (conv_doc or {}).get("current_goal")
+    if current_goal:
+        system_prompt += f"\n\n=== CURRENT SESSION GOAL ===\n{current_goal}\n=== END GOAL ===\n"
+
     do_research = req.use_web_search or (bool(TAVILY_API_KEY) and should_auto_research(req.message))
     if do_research:
         res = tavily_search(req.message)
@@ -998,8 +1152,8 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
                 "contradictory, say so and give your best-supported answer with a brief note on your "
                 "confidence. Do not present unverified guesses as established fact."
             )
-        elif not TAVILY_API_KEY:
-            system_prompt += "\n\n(Note: web search is not yet configured by the admin.)"
+    elif not TAVILY_API_KEY:
+        system_prompt += "\n\n(Note: web search is not yet configured by the admin.)"
 
     images, doc_text = await load_attachments(req.attachment_ids)
 
@@ -1040,7 +1194,9 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
 
     asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
-    return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
+        asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
+        return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
+
 
 
 # ---------------------------------------------------------------------------
