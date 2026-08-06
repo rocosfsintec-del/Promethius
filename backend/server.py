@@ -1103,23 +1103,24 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
                 reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
         else:
             reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
-    except Exception as e:
+    
+except Exception as e:
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")
 
-        ts = datetime.now(timezone.utc)
-        user_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
-                    "role": "user", "content": req.message, "type": "text",
-                    "attachment_ids": req.attachment_ids, "created_at": ts.isoformat()}
-        ai_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
-                  "role": "assistant", "content": reply, "type": "text",
-                  "push_proposal": push_proposal,
-                  "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
-        await db.messages.insert_many([user_msg, ai_msg])
-        await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
-        asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
-        asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
-        return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
+    ts = datetime.now(timezone.utc)
+    user_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
+                "role": "user", "content": req.message, "type": "text",
+                "attachment_ids": req.attachment_ids, "created_at": ts.isoformat()}
+    ai_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
+              "role": "assistant", "content": reply, "type": "text",
+              "push_proposal": push_proposal,
+              "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
+    await db.messages.insert_many([user_msg, ai_msg])
+    await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
+    asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
+    asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
+    return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
 
 
 
