@@ -569,10 +569,6 @@ def openai_client(provider: str):
         return AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)
     return AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-async def get_or_create_conversation_summary(conv_id: str, history: list) -> str:
-    """Return a short rolling summary of the conversation so far."""
-    if len(history) < 8:
-        return ""  # too short to summarize
 
 async def get_or_create_conversation_summary(conv_id: str, history: list) -> str:
     """Return a short rolling summary of the conversation so far."""
@@ -719,6 +715,11 @@ def should_auto_research(message: str) -> bool:
     return "?" in m or any(t in m for t in triggers)
 
 
+# Text caps for attached documents injected into LLM context
+DOC_TEXT_CAP_DEFAULT = 8000
+DOC_TEXT_CAP_PDF = 40000  # PDFs are legitimately longer than random pastes
+
+
 async def load_attachments(attachment_ids: List[str]):
     images, docs = [], []
     for fid in attachment_ids:
@@ -733,7 +734,27 @@ async def load_attachments(attachment_ids: List[str]):
             except Exception as e:
                 logger.error(f"img attach err {e}")
         elif rec.get("extracted_text"):
-            docs.append(f"[File: {rec['original_filename']}]\n{rec['extracted_text'][:8000]}")
+            fname = rec.get("original_filename", "unnamed")
+            text = rec["extracted_text"]
+            pdf_meta = rec.get("pdf_meta")
+            if pdf_meta:
+                # Rich header for PDFs — page count, form fields, title if present
+                bits = [f"{pdf_meta.get('pages', '?')} pages"]
+                if pdf_meta.get("title"):
+                    bits.append(f"title={pdf_meta['title'][:80]!r}")
+                if pdf_meta.get("has_forms"):
+                    bits.append("has_forms=true")
+                if not pdf_meta.get("ocr_available", True):
+                    bits.append("ocr=unavailable")
+                header = f"[PDF: {fname}, {', '.join(bits)}]"
+                cap = DOC_TEXT_CAP_PDF
+            else:
+                header = f"[File: {fname}]"
+                cap = DOC_TEXT_CAP_DEFAULT
+
+            if len(text) > cap:
+                text = text[:cap] + f"\n\n[…truncated at {cap} chars of {len(rec['extracted_text'])} total…]"
+            docs.append(f"{header}\n{text}")
     return images, "\n\n".join(docs)
 
 
@@ -902,6 +923,60 @@ async def _exec_gh_tool(name, args, user_id):
     return {"error": "unknown tool"}
 
 
+async def _exec_pdf_tool(name, args, user_id):
+    """Execute PDF generation tools. Returns {file_id, url, ...} on success,
+    {error: reason} on failure. Loud on all failures, never silent."""
+    try:
+        if name == "generate_pdf":
+            from tools.pdf import generate_pdf_from_markdown, PdfToolError
+            content = args.get("content") or ""
+            title = args.get("title") or None
+            filename = args.get("filename") or "document.pdf"
+            if not filename.lower().endswith(".pdf"):
+                filename += ".pdf"
+            if not content.strip():
+                return {"error": "No content provided to generate PDF."}
+            try:
+                pdf_bytes = generate_pdf_from_markdown(content, title=title)
+            except PdfToolError as e:
+                logger.error(f"[pdf tool] generate_pdf failed: {e.reason}")
+                return {"error": e.reason}
+
+            # Store the generated PDF in the user's files (same pattern as image gen)
+            path = f"{APP_NAME}/generated/{user_id}/{uuid.uuid4()}.pdf"
+            put_object(path, pdf_bytes, "application/pdf")
+
+            # Get metadata for the file record
+            from tools.pdf import pdf_metadata
+            try:
+                pdf_meta = pdf_metadata(pdf_bytes)
+            except Exception:
+                pdf_meta = None
+
+            rec = {
+                "id": str(uuid.uuid4()), "user_id": user_id, "storage_path": path,
+                "original_filename": filename, "content_type": "application/pdf",
+                "size": len(pdf_bytes), "kind": "generated_pdf",
+                "extracted_text": content[:20000],
+                "pdf_meta": pdf_meta,
+                "is_deleted": False, "created_at": now_iso()
+            }
+            await db.files.insert_one(dict(rec))
+            return {
+                "status": "ok",
+                "file_id": rec["id"],
+                "url": f"/api/files/{path}",
+                "filename": filename,
+                "size_bytes": len(pdf_bytes),
+                "pages": (pdf_meta or {}).get("pages", "?"),
+                "note": "PDF generated and saved to the user's files. Give them the download link."
+            }
+    except Exception as e:
+        logger.error(f"[pdf tool] {name} exception: {e}")
+        return {"error": str(e)[:200]}
+    return {"error": "unknown pdf tool"}
+
+
 _GH_TOOLS_OPENAI = [
     {"type": "function", "function": {
         "name": "list_github_files", "description": "List all files in a GitHub repository. Call this first when the user asks you to look at / pull / review a repo.",
@@ -931,6 +1006,32 @@ _GH_TOOLS_ANTHROPIC = [
     for t in _GH_TOOLS_OPENAI
 ]
 
+_PDF_TOOLS_OPENAI = [
+    {"type": "function", "function": {
+        "name": "generate_pdf",
+        "description": "Generate a PDF document from markdown-formatted content. Use when the user asks you to create, make, generate, or produce a PDF (report, document, summary, letter, etc.). Returns a file_id and download URL. Do NOT claim the PDF exists until this tool succeeds.",
+        "parameters": {"type": "object", "properties": {
+            "content": {"type": "string", "description": "The full markdown content of the document. Use # for headings, - for bullets."},
+            "title": {"type": "string", "description": "Optional document title, shown at the top."},
+            "filename": {"type": "string", "description": "Filename for the PDF, e.g. 'quarterly-report.pdf'. Defaults to 'document.pdf'."}
+        }, "required": ["content"]}}},
+]
+
+_PDF_TOOLS_ANTHROPIC = [
+    {"name": t["function"]["name"], "description": t["function"]["description"], "input_schema": t["function"]["parameters"]}
+    for t in _PDF_TOOLS_OPENAI
+]
+
+PDF_TOOL_GUIDANCE = (
+    "\n\n=== PDF ABILITIES ===\n"
+    "You can generate PDF documents on demand using the generate_pdf tool. When the user asks you to create/make/produce a PDF "
+    "(report, letter, summary, document, invoice, etc.), CALL generate_pdf with markdown content — do not just return raw text. "
+    "Use markdown formatting: # Heading, ## Subheading, - bullet, plain paragraphs. Give it a meaningful filename. "
+    "After the tool returns, tell the user the PDF was generated and give them the download URL. "
+    "Do NOT claim a PDF was created until generate_pdf returns status=ok.\n"
+    "=== END PDF ABILITIES ===\n"
+)
+
 GH_TOOL_GUIDANCE = (
     "\n\n=== GITHUB ABILITIES ===\n"
     "You can act on GitHub using these tools: list_github_files, read_github_file, "
@@ -954,8 +1055,10 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
     msgs = [{"role": "system", "content": system_prompt}]
     msgs += [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
+    all_tools = _GH_TOOLS_OPENAI + _PDF_TOOLS_OPENAI
+    pdf_tool_names = {t["function"]["name"] for t in _PDF_TOOLS_OPENAI}
     for _ in range(6):
-        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=_GH_TOOLS_OPENAI, max_tokens=8192)
+        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=all_tools, max_tokens=8192)
         msg = resp.choices[0].message
         if not msg.tool_calls:
             return (msg.content or ""), proposal
@@ -966,7 +1069,10 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
                 args = json.loads(tc.function.arguments or "{}")
             except Exception:
                 args = {}
-            result = await _exec_gh_tool(tc.function.name, args, user_id)
+            if tc.function.name in pdf_tool_names:
+                result = await _exec_pdf_tool(tc.function.name, args, user_id)
+            else:
+                result = await _exec_gh_tool(tc.function.name, args, user_id)
             if tc.function.name == "propose_github_push" and result.get("proposal"):
                 proposal = result["proposal"]
             tool_content = json.dumps(result)
@@ -982,16 +1088,21 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
     msgs = [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
+    all_tools = _GH_TOOLS_ANTHROPIC + _PDF_TOOLS_ANTHROPIC
+    pdf_tool_names = {t["name"] for t in _PDF_TOOLS_ANTHROPIC}
     for _ in range(6):
         resp = await clt.messages.create(model=model, max_tokens=8192, system=system_prompt,
-                                         messages=msgs, tools=_GH_TOOLS_ANTHROPIC)
+                                         messages=msgs, tools=all_tools)
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
         if not tool_uses:
             return "".join(getattr(b, "text", "") for b in resp.content), proposal
         msgs.append({"role": "assistant", "content": [b.model_dump() for b in resp.content]})
         results = []
         for tu in tool_uses:
-            result = await _exec_gh_tool(tu.name, tu.input or {}, user_id)
+            if tu.name in pdf_tool_names:
+                result = await _exec_pdf_tool(tu.name, tu.input or {}, user_id)
+            else:
+                result = await _exec_gh_tool(tu.name, tu.input or {}, user_id)
             if tu.name == "propose_github_push" and result.get("proposal"):
                 proposal = result["proposal"]
             tool_content = json.dumps(result)
@@ -1092,7 +1203,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
                 mem += f"\nLAST REPO the user worked on (use when they say 'the repo'/'that repo' without a URL): {cfg['last_repo']}"
             if not cfg.get("self_repo"):
                 mem += "\nIf the user asks you to modify your OWN code but no self-repo is set, ask which repo is yours, then call set_self_repo."
-            tool_system = system_prompt + GH_TOOL_GUIDANCE + mem
+            tool_system = system_prompt + GH_TOOL_GUIDANCE + PDF_TOOL_GUIDANCE + mem
             hist = history
             if doc_text:
                 hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
@@ -1544,12 +1655,22 @@ async def del_scheduled(jid: str, user=Depends(get_current_user)):
 # Files / uploads
 # ---------------------------------------------------------------------------
 def extract_text(filename: str, content_type: str, data: bytes) -> str:
+    """Extract text from an uploaded file. PDFs route through tools.pdf for
+    real extraction (pdfplumber → PyPDF2 → OCR). Other types unchanged.
+    Note: Does NOT return PDF metadata — callers that need it (like /upload)
+    should call tools.pdf.extract_pdf_text() directly."""
     name = (filename or "").lower()
     try:
         if name.endswith(".pdf") or content_type == "application/pdf":
-            from PyPDF2 import PdfReader
-            reader = PdfReader(BytesIO(data))
-            return "\n".join((p.extract_text() or "") for p in reader.pages)
+            from tools.pdf import extract_pdf_text, PdfToolError
+            try:
+                text, info = extract_pdf_text(data, ocr=True)
+                logger.info(f"[pdf] extracted {info['chars_extracted']} chars via {info['method_used']} "
+                            f"from {name or 'unnamed.pdf'}")
+                return text
+            except PdfToolError as e:
+                logger.error(f"[pdf] extract failed for {name}: {e.reason}")
+                raise  # Let /upload surface the loud error
         if name.endswith(".docx"):
             import docx
             doc = docx.Document(BytesIO(data))
@@ -1567,15 +1688,48 @@ async def upload(file: UploadFile = File(...), vault: bool = Form(False), user=D
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "bin"
     path = f"{APP_NAME}/uploads/{user['id']}/{uuid.uuid4()}.{ext}"
     ct = file.content_type or "application/octet-stream"
+
+    # PDF pre-flight: loud errors on encrypted / oversized / unreadable before we store anything
+    pdf_meta = None
+    fname_lower = (file.filename or "").lower()
+    is_pdf = fname_lower.endswith(".pdf") or ct == "application/pdf"
+    if is_pdf:
+        from tools.pdf import pdf_metadata, PdfToolError
+        try:
+            pdf_meta = pdf_metadata(data)
+        except PdfToolError as e:
+            logger.error(f"[upload] PDF pre-flight failed for {file.filename}: {e.reason}")
+            raise HTTPException(status_code=e.http_status, detail=e.reason)
+        if pdf_meta["encrypted"]:
+            raise HTTPException(status_code=422,
+                                detail="PDF is password-protected. Unlock it first, then re-upload.")
+
     put_object(path, data, ct)
-    extracted = extract_text(file.filename, ct, data)
+
+    # Extract text — for PDFs, tools.pdf handles it; loud raise on PdfToolError
+    try:
+        extracted = extract_text(file.filename, ct, data)
+    except Exception as e:
+        # Clean up the just-written object so we don't leak orphaned files
+        try:
+            from pathlib import Path as _P
+            (_P(STORAGE_DIR) / path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        logger.error(f"[upload] text extraction failed for {file.filename}: {e}")
+        raise HTTPException(status_code=422,
+                            detail=f"Could not extract text from file: {str(e)[:200]}")
+
     rec = {"id": str(uuid.uuid4()), "user_id": user["id"], "storage_path": path,
            "original_filename": file.filename, "content_type": ct, "size": len(data),
            "kind": "vault" if vault else "upload", "extracted_text": extracted,
            "is_deleted": False, "created_at": now_iso()}
+    if pdf_meta:
+        rec["pdf_meta"] = pdf_meta
     await db.files.insert_one(dict(rec))
     return {"id": rec["id"], "url": f"/api/files/{path}", "original_filename": file.filename,
-            "content_type": ct, "has_text": bool(extracted)}
+            "content_type": ct, "has_text": bool(extracted),
+            "pdf_meta": pdf_meta}
 
 
 @api_router.get("/files/{path:path}")
