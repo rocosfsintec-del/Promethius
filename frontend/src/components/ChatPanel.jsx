@@ -21,6 +21,34 @@ const MODEL_LABELS = {
   "qwen2.5": "Qwen 2.5 (Ollama)",
 };
 
+// Rough cost tier per model — green (free/local), yellow (moderate), red (premium).
+const MODEL_COST = {
+  "gpt-4o-mini": "moderate",
+  "gpt-4o": "moderate",
+  "gpt-5.5": "expensive",
+  "claude-haiku-4-5": "moderate",
+  "claude-sonnet-4-6": "moderate",
+  "claude-opus-4-7": "expensive",
+  "llama2-uncensored": "free",
+  "llama3.1": "free",
+  "mistral": "free",
+  "qwen2.5": "free",
+};
+
+const COST_STYLES = {
+  free: { dot: "bg-emerald-500", text: "text-emerald-400", label: "Free" },
+  moderate: { dot: "bg-amber-400", text: "text-amber-300", label: "Moderate" },
+  expensive: { dot: "bg-red-500", text: "text-red-400", label: "Premium" },
+};
+
+const costOf = (p, m) =>
+  MODEL_COST[m] ||
+  (p === "ollama"
+    ? "free"
+    : String(m).includes("gpt-5") || String(m).includes("opus")
+    ? "expensive"
+    : "moderate");
+
 export default function ChatPanel({
   conversationId, setConversationId, providers, provider, model,
   onModelChange, refreshConversations,
@@ -183,27 +211,48 @@ export default function ChatPanel({
             onClick={() => setModelOpen((o) => !o)}
             className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#121214] border border-white/10 hover:border-white/20 text-sm font-medium text-zinc-200 transition-colors"
           >
-            <Flame size={15} className="text-orange-500" strokeWidth={1.5} />
+            <span
+              className={`w-2 h-2 rounded-full ${COST_STYLES[costOf(provider, model)].dot}`}
+              title={`${COST_STYLES[costOf(provider, model)].label} cost`}
+            />
             {MODEL_LABELS[model] || model}
           </button>
           {modelOpen && (
-            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-60 backdrop-blur-xl py-1">
-              {flat.map(({ p, m }) => (
-                <button
-                  key={p + m}
-                  data-testid={`model-option-${m}`}
-                  onClick={() => {
-                    onModelChange(p, m);
-                    setModelOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/5 transition-colors flex items-center justify-between ${
-                    m === model ? "text-orange-400" : "text-zinc-300"
-                  }`}
-                >
-                  {MODEL_LABELS[m] || m}
-                  <span className="font-mono text-[10px] uppercase text-zinc-600">{p}</span>
-                </button>
-              ))}
+            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-64 backdrop-blur-xl py-1">
+              {flat.map(({ p, m }) => {
+                const cost = costOf(p, m);
+                const cs = COST_STYLES[cost];
+                return (
+                  <button
+                    key={p + m}
+                    data-testid={`model-option-${m}`}
+                    data-cost={cost}
+                    onClick={() => {
+                      onModelChange(p, m);
+                      setModelOpen(false);
+                    }}
+                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/5 transition-colors flex items-center justify-between gap-2 ${
+                      m === model ? "bg-white/5" : ""
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${cs.dot}`} title={`${cs.label} cost`} />
+                      <span className={`truncate ${m === model ? "text-orange-400" : cs.text}`}>
+                        {MODEL_LABELS[m] || m}
+                      </span>
+                    </span>
+                    <span className="font-mono text-[10px] uppercase text-zinc-600 shrink-0">{p}</span>
+                  </button>
+                );
+              })}
+              <div className="flex items-center gap-3 px-4 py-2 mt-1 border-t border-white/5 text-[10px] text-zinc-500">
+                {Object.values(COST_STYLES).map((c) => (
+                  <span key={c.label} className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+                    {c.label}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
