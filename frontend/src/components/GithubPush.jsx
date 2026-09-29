@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Github, X, Loader2, Plus, Trash2, GitBranch, ShieldCheck,
-  CheckCircle2, ExternalLink, FileCode2, Sparkles, ChevronDown,
+  CheckCircle2, ExternalLink, FileCode2, Sparkles, ChevronDown, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -100,12 +100,21 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
   const [diffs, setDiffs] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
+  const [selfConfig, setSelfConfig] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const loadSelfConfig = async () => {
+    try {
+      const r = await api.get("/github/self-config");
+      setSelfConfig(r.data);
+    } catch { /* non-fatal */ }
+  };
 
   const loadStatus = useCallback(async () => {
     try {
       const r = await api.get("/github/status");
       setStatus(r.data);
-      if (r.data.connected) loadRepos();
+      if (r.data.connected) { loadRepos(); loadSelfConfig(); }
     } catch {
       setStatus({ connected: false });
     }
@@ -148,6 +157,9 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
 
   useEffect(() => {
     if (step !== "review" || !repo || files.length === 0) return;
+    // A full-source sync can be 100+ files; skip the per-file GitHub diff fetch
+    // (one API call each) to stay fast and within rate limits.
+    if (files.length > 40) { setDiffs([]); setDiffLoading(false); return; }
     let cancelled = false;
     (async () => {
       setDiffLoading(true);
@@ -207,6 +219,35 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
     }
     setFiles((f) => [...f, ...blocks]);
     toast.success(`Added ${blocks.length} file(s) from the chat`);
+  };
+
+  const syncEntireSource = async () => {
+    setSyncing(true);
+    try {
+      const r = await api.get("/github/self-bundle");
+      const bundle = r.data;
+      const repoName = bundle.repo || (selfConfig && selfConfig.self_repo) || "";
+      let target = repos.find((x) => x.full_name.toLowerCase() === repoName.toLowerCase());
+      if (!target) {
+        const [o, n] = repoName.split("/");
+        target = { full_name: repoName, owner: o, name: n, default_branch: "main" };
+      }
+      setRepo(target);
+      setCreateBranch(true);
+      setBranch("promethius-sync");
+      setOpenPr(true);
+      setMessage("Sync Promethius source from live app");
+      setFiles(bundle.files || []);
+      if (bundle.skipped && bundle.skipped.length) {
+        toast.info(`${bundle.skipped.length} file(s) skipped (too large or binary)`);
+      }
+      toast.success(`Staged ${bundle.file_count} source files → ${repoName}`);
+      setStep("review");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not load source bundle");
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const loadSelfSource = async () => {
@@ -345,6 +386,35 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
           {/* Connected + compose step */}
           {status?.connected && step === "compose" && (
             <div className="space-y-5">
+              {/* Self-update: one-click full-source sync to Promethius's own repo */}
+              <div data-testid="github-self-update-card" className="rounded-xl border border-orange-500/25 bg-gradient-to-br from-orange-500/10 to-transparent p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <RefreshCw size={14} className="text-orange-400 shrink-0" />
+                      <span className="text-sm font-medium text-zinc-100">Self-update</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      Push Promethius's entire live source to{" "}
+                      <span className="font-mono text-orange-300">
+                        {selfConfig ? selfConfig.self_repo : "…"}
+                      </span>
+                      {selfConfig?.is_default ? " (default)" : ""} as a{" "}
+                      <span className="text-zinc-300">promethius-sync</span> branch + PR.
+                    </p>
+                  </div>
+                  <button
+                    data-testid="github-sync-source"
+                    onClick={syncEntireSource}
+                    disabled={syncing}
+                    className="shrink-0 h-9 px-3.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-medium disabled:opacity-40 flex items-center gap-2 transition-colors"
+                  >
+                    {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    Sync all
+                  </button>
+                </div>
+              </div>
+
               {/* Repo picker */}
               <div>
                 <label className="text-[11px] text-zinc-500 font-mono uppercase tracking-wider">Repository</label>

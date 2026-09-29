@@ -49,6 +49,25 @@ User asked to pull the repo into a fresh workspace and repair it.
 
 ## Backlog / next
 - P1: Anthropic-native tool path only used when a real ANTHROPIC_API_KEY is set (else proxy).
+
+## Self-update repo (2026-06 — E1)
+- Goal: let Promethius keep its own GitHub repo in sync ("both": one-click full-source sync + AI-proposed edits).
+- Default self-repo = `rocosfsintec-del/Promethius` (env `SELF_REPO` overridable). Chat now always
+  knows its own repo (memory injection defaults to it) — verified: asking "your repo" returns it.
+- New backend endpoints (backend/server.py):
+  - GET  /api/github/self-config  → {self_repo, is_default, default_repo, last_repo, connected}
+  - PUT  /api/github/self-config  → set self_repo from a URL/owner-repo
+  - GET  /api/github/self-bundle  → entire live source in ONE call (93 files, ~0.5MB),
+    excludes node_modules/storage/memory/.env/tests-caches/etc so NO secrets or uploads leak (verified).
+- Frontend (GithubPush.jsx): new "Self-update" card in compose step with a `github-sync-source`
+  ("Sync all") button → loads the bundle, targets the self-repo, stages a `promethius-sync` branch
+  + PR, and jumps straight to the review→approve→push gate. Review auto-diff is skipped when >40
+  files (rate-limit safety); file list still shows per-file add counts.
+- AI-driven path (b) already worked (list/read/propose_github_push tools + review dialog); now
+  seamless because the self-repo no longer needs to be set manually.
+- NOT yet tested live: the actual commit/push and the connected-state UI — these require the
+  user's GitHub Personal Access Token (repo scope), which the user will paste into the in-app
+  GitHub panel later. Backend read endpoints + chat recognition verified via curl.
 - P1: Push repaired baseline back to existing GitHub repo (no delete needed).
 - P2: Review the self-modification/GitHub feature that caused the break to add guardrails.
 

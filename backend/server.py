@@ -1250,12 +1250,10 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
         if req.provider in ("openai", "anthropic") and not images:
             cfg = await db.github_config.find_one({"user_id": uid}) or {}
             mem = ""
-            if cfg.get("self_repo"):
-                mem += f"\nYOUR OWN REPO (use when the user says 'your code'/'yourself'/'update yourself'): {cfg['self_repo']}"
+            self_repo = cfg.get("self_repo") or DEFAULT_SELF_REPO
+            mem += f"\nYOUR OWN REPO (use when the user says 'your code'/'yourself'/'update yourself'): {self_repo}"
             if cfg.get("last_repo"):
                 mem += f"\nLAST REPO the user worked on (use when they say 'the repo'/'that repo' without a URL): {cfg['last_repo']}"
-            if not cfg.get("self_repo"):
-                mem += "\nIf the user asks you to modify your OWN code but no self-repo is set, ask which repo is yours, then call set_self_repo."
             tool_system = system_prompt + GH_TOOL_GUIDANCE + PDF_TOOL_GUIDANCE + mem
             hist = history
             if doc_text:
@@ -2036,6 +2034,35 @@ GH_API = "https://api.github.com"
 GH_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
               "User-Agent": "Promethius"}
 _SELF_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".css", ".json", ".md", ".html", ".txt"}
+# The repo that IS Promethius's own source (overridable via env / set_self_repo tool).
+DEFAULT_SELF_REPO = os.environ.get("SELF_REPO", "rocosfsintec-del/Promethius")
+_SELF_MAX_FILE_BYTES = 120_000        # skip any single file larger than this
+_SELF_BUNDLE_MAX_BYTES = 3_000_000    # total cap for a full-source bundle
+_SELF_SKIP_DIRS = {"node_modules", "__pycache__", "build", ".git", "dist", ".next", "coverage",
+                   "venv", ".venv", ".pytest_cache", "storage", "test_reports", "memory", ".emergent"}
+
+
+def _list_self_paths():
+    """All of Promethius's own editable source files (relative to /app)."""
+    out = []
+    for base in ["backend", "frontend/src", "frontend/public"]:
+        root = APP_ROOT / base
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if not p.is_file() or p.suffix not in _SELF_SUFFIXES:
+                continue
+            if _SELF_SKIP_DIRS & set(p.parts):
+                continue
+            out.append(str(p.relative_to(APP_ROOT)))
+    # A couple of useful root-level files if present.
+    for extra in ["backend/requirements.txt", "frontend/package.json", "README.md"]:
+        fp = APP_ROOT / extra
+        if fp.is_file():
+            rp = str(fp.relative_to(APP_ROOT))
+            if rp not in out:
+                out.append(rp)
+    return sorted(set(out))
 
 
 class GithubTokenReq(BaseModel):
@@ -2167,6 +2194,67 @@ async def gh_self_file(path: str, user=Depends(get_current_user)):
     except Exception:
         raise HTTPException(status_code=400, detail="Cannot read that file as text.")
     return {"path": path, "content": content}
+
+
+@api_router.get("/github/self-config")
+async def gh_self_config(user=Depends(get_current_user)):
+    """Which repo is Promethius itself, plus the last repo the user touched."""
+    cfg = await db.github_config.find_one({"user_id": user["id"]}) or {}
+    return {
+        "self_repo": cfg.get("self_repo") or DEFAULT_SELF_REPO,
+        "is_default": not cfg.get("self_repo"),
+        "default_repo": DEFAULT_SELF_REPO,
+        "last_repo": cfg.get("last_repo"),
+        "connected": bool(cfg.get("token_enc")),
+    }
+
+
+class SelfRepoReq(BaseModel):
+    repo_url: str
+
+
+@api_router.put("/github/self-config")
+async def gh_set_self_config(req: SelfRepoReq, user=Depends(get_current_user)):
+    owner, repo = _parse_repo_url(req.repo_url)
+    await db.github_config.update_one(
+        {"user_id": user["id"]},
+        {"$set": {"user_id": user["id"], "self_repo": f"{owner}/{repo}"}},
+        upsert=True)
+    return {"self_repo": f"{owner}/{repo}"}
+
+
+@api_router.get("/github/self-bundle")
+async def gh_self_bundle(user=Depends(get_current_user)):
+    """Read Promethius's entire live source in one call, so the UI can stage a
+    full-source sync commit. Content is capped to keep the payload sane."""
+    root = APP_ROOT.resolve()
+    files, skipped, total = [], [], 0
+    for rel in _list_self_paths():
+        target = (APP_ROOT / rel).resolve()
+        if not str(target).startswith(str(root)) or not target.is_file():
+            continue
+        try:
+            size = target.stat().st_size
+            if size > _SELF_MAX_FILE_BYTES:
+                skipped.append({"path": rel, "reason": f"large ({size} bytes)"})
+                continue
+            if total + size > _SELF_BUNDLE_MAX_BYTES:
+                skipped.append({"path": rel, "reason": "bundle size limit"})
+                continue
+            content = target.read_text(encoding="utf-8")
+        except Exception:
+            skipped.append({"path": rel, "reason": "not text"})
+            continue
+        total += size
+        files.append({"path": rel, "content": content})
+    cfg = await db.github_config.find_one({"user_id": user["id"]}) or {}
+    return {
+        "repo": cfg.get("self_repo") or DEFAULT_SELF_REPO,
+        "file_count": len(files),
+        "total_bytes": total,
+        "skipped": skipped,
+        "files": files,
+    }
 
 
 @api_router.post("/github/commit")
