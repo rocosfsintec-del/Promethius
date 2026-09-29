@@ -49,6 +49,43 @@ const costOf = (p, m) =>
     ? "expensive"
     : "moderate");
 
+// Approx USD per 1M tokens: [input, output]. Absent => local/free.
+const MODEL_PRICING = {
+  "gpt-4o-mini": [0.15, 0.6],
+  "gpt-4o": [2.5, 10],
+  "gpt-5.5": [10, 30],
+  "claude-haiku-4-5": [1, 5],
+  "claude-sonnet-4-6": [3, 15],
+  "claude-opus-4-7": [15, 75],
+};
+// Representative message used for the dropdown estimate.
+const EST_IN_TOKENS = 1000;
+const EST_OUT_TOKENS = 500;
+const approxTokens = (t) => Math.max(1, Math.ceil((t || "").length / 4));
+
+const estMsgCost = (p, m) => {
+  if (p === "ollama" || costOf(p, m) === "free") return 0;
+  const pr = MODEL_PRICING[m];
+  if (!pr) return null;
+  return (pr[0] * EST_IN_TOKENS + pr[1] * EST_OUT_TOKENS) / 1e6;
+};
+
+const liveMsgCost = (p, m, inText, outText) => {
+  if (p === "ollama" || costOf(p, m) === "free") return 0;
+  const pr = MODEL_PRICING[m];
+  if (!pr) return null;
+  return (pr[0] * approxTokens(inText) + pr[1] * approxTokens(outText)) / 1e6;
+};
+
+const fmtCost = (c) =>
+  c === 0 ? "Free" : c == null ? "" : `~$${c < 0.001 ? c.toFixed(5) : c < 0.01 ? c.toFixed(4) : c.toFixed(3)}`;
+
+const rateLabel = (p, m) => {
+  if (p === "ollama" || costOf(p, m) === "free") return "Runs locally · no API cost";
+  const pr = MODEL_PRICING[m];
+  return pr ? `$${pr[0]}/M in · $${pr[1]}/M out` : "Pricing unavailable";
+};
+
 export default function ChatPanel({
   conversationId, setConversationId, providers, provider, model,
   onModelChange, refreshConversations,
@@ -216,6 +253,9 @@ export default function ChatPanel({
               title={`${COST_STYLES[costOf(provider, model)].label} cost`}
             />
             {MODEL_LABELS[model] || model}
+            <span className={`font-mono text-[11px] ${COST_STYLES[costOf(provider, model)].text}`} title={rateLabel(provider, model)}>
+              {fmtCost(estMsgCost(provider, model))}
+            </span>
           </button>
           {modelOpen && (
             <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-64 backdrop-blur-xl py-1">
@@ -227,6 +267,7 @@ export default function ChatPanel({
                     key={p + m}
                     data-testid={`model-option-${m}`}
                     data-cost={cost}
+                    title={rateLabel(p, m)}
                     onClick={() => {
                       onModelChange(p, m);
                       setModelOpen(false);
@@ -241,17 +282,22 @@ export default function ChatPanel({
                         {MODEL_LABELS[m] || m}
                       </span>
                     </span>
-                    <span className="font-mono text-[10px] uppercase text-zinc-600 shrink-0">{p}</span>
+                    <span data-testid={`model-price-${m}`} className={`font-mono text-[10px] shrink-0 ${cs.text}`}>
+                      {fmtCost(estMsgCost(p, m))}
+                    </span>
                   </button>
                 );
               })}
-              <div className="flex items-center gap-3 px-4 py-2 mt-1 border-t border-white/5 text-[10px] text-zinc-500">
-                {Object.values(COST_STYLES).map((c) => (
-                  <span key={c.label} className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${c.dot}`} />
-                    {c.label}
-                  </span>
-                ))}
+              <div className="flex items-center justify-between px-4 py-2 mt-1 border-t border-white/5 text-[10px] text-zinc-500">
+                <span className="flex items-center gap-3">
+                  {Object.values(COST_STYLES).map((c) => (
+                    <span key={c.label} className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+                      {c.label}
+                    </span>
+                  ))}
+                </span>
+                <span className="text-zinc-600">est. / msg</span>
               </div>
             </div>
           )}
@@ -272,7 +318,7 @@ export default function ChatPanel({
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.map((m, idx) => (
             <div key={m.id} className="mb-8 animate-fade-up">
               {m.role === "user" ? (
                 <div className="max-w-[80%] ml-auto bg-[#1c1c1f] border border-white/5 text-zinc-100 rounded-3xl rounded-tr-md px-5 py-3.5">
@@ -311,6 +357,20 @@ export default function ChatPanel({
                           >
                             ▶ Speak
                           </button>
+                          {(() => {
+                            const prev = idx > 0 && messages[idx - 1]?.role === "user" ? messages[idx - 1].content : "";
+                            const c = liveMsgCost(provider, model, prev, m.content);
+                            if (c == null) return null;
+                            return (
+                              <span
+                                data-testid="message-cost"
+                                title={`Estimated with ${MODEL_LABELS[model] || model} · ${rateLabel(provider, model)}`}
+                                className={`text-[11px] font-mono ${COST_STYLES[costOf(provider, model)].text}`}
+                              >
+                                {c === 0 ? "Free" : fmtCost(c)}
+                              </span>
+                            );
+                          })()}
                           {(m.pushProposal || m.push_proposal) && (
                             <button
                               data-testid="review-push-button"
