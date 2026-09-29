@@ -5,6 +5,7 @@ export const DEFAULT_ORB = {
   lightning: 0.5,
   chaos: 1,
   idle: 0.12,
+  density: 1,
 };
 
 export function hexToRgb(hex) {

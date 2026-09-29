@@ -18,6 +18,8 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
     let t = 0;
     let smooth = 0;
     let voiceSmooth = 0;
+    let flare = 0;        // fast-attack / slow-release envelope for syllable flares
+    let embers = [];      // faint rising ember particles that drift off the flames
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -36,6 +38,9 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       const target = energyRef.current;
       smooth += (target - smooth) * 0.08;
       voiceSmooth += ((voiceRef ? voiceRef.current : 0) - voiceSmooth) * 0.4;
+      // Sharp flare: snap up on a syllable, ease back down.
+      const vNow = voiceRef ? voiceRef.current : 0;
+      flare += (vNow - flare) * (vNow > flare ? 0.6 : 0.12);
       const eff = Math.min(smooth + voiceSmooth * 1.7, 1.2);
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -93,24 +98,29 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
 
       // Ghost flames licking around the sphere's rim/surface (additive glow).
       ctx.globalCompositeOperation = "lighter";
-      const flameBright = 0.1 + bright * 0.5;
-      const N = 24;
+      const flameBright = 0.1 + bright * 0.5 + flare * 0.5;
+      // Voice flare pushes tongues sharply outward on each spoken syllable.
+      const flareOut = flare * R * 1.5;
+      const N = Math.max(6, Math.min(48, Math.round(24 * (cfg.density ?? 1))));
+      const tips = [];
       for (let i = 0; i < N; i++) {
         const a0 = (i / N) * Math.PI * 2;
         const sway = Math.sin(t * danceSpeed + i * 1.3) * 0.13 * chaos;
         const a = a0 + sway;
         const flick = 0.35 + 0.65 * Math.abs(Math.sin(t * (2.4 + danceSpeed) * chaos + i * 4.7));
-        const len = R * (0.16 + 0.55 * flick * (0.45 + eff));
+        const len = R * (0.16 + 0.55 * flick * (0.45 + eff)) + flareOut * (0.6 + 0.4 * flick);
         const bx = cx + Math.cos(a) * R;
         const by = cy + Math.sin(a) * R;
         const tang = a + Math.PI / 2;
-        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.4 * chaos;
+        // Straighten the sway when flaring so flames shoot outward sharply.
+        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.4 * chaos * (1 - Math.min(flare * 1.2, 0.85));
         const tipx = bx + Math.cos(a) * len + Math.cos(tang) * swayAmt;
         const tipy = by + Math.sin(a) * len + Math.sin(tang) * swayAmt;
         drawFlameTongue(bx, by, tipx, tipy, R * 0.12 * (0.6 + flick), flameBright);
+        tips.push({ x: tipx, y: tipy });
       }
       // A few faint licks across the FRONT surface so it feels wrapped in fire.
-      const M = 9;
+      const M = Math.max(4, Math.round(9 * (cfg.density ?? 1)));
       for (let i = 0; i < M; i++) {
         const ang = t * 0.35 * danceSpeed + i * ((Math.PI * 2) / M);
         const rr = R * (0.28 + 0.55 * Math.abs(Math.sin(t * 0.7 + i * 1.7)));
@@ -120,6 +130,41 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
         const len = R * 0.13 * (0.5 + eff);
         drawFlameTongue(bx, by, bx + Math.sin(t * 2 + i) * len * 0.5, by - len * (0.5 + flick), R * 0.06, flameBright * 0.55);
       }
+
+      // Faint rising embers that drift off the flame tips for a ghostly atmosphere.
+      if (tips.length) {
+        const spawnChance = 0.22 + bright * 0.45 + flare * 1.1;
+        const spawns = (Math.random() < spawnChance ? 1 : 0) + (Math.random() < flare * 1.2 ? 1 : 0);
+        for (let k = 0; k < spawns; k++) {
+          const tip = tips[(Math.random() * tips.length) | 0];
+          embers.push({
+            x: tip.x + (Math.random() - 0.5) * R * 0.15,
+            y: tip.y + (Math.random() - 0.5) * R * 0.1,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: -(0.25 + Math.random() * 0.55) - flare * 1.8,
+            life: 1,
+            rad: 0.8 + Math.random() * (1.6 + flare * 2),
+          });
+        }
+      }
+      if (embers.length > 100) embers = embers.slice(embers.length - 100);
+      for (const e of embers) {
+        e.x += e.vx;
+        e.y += e.vy;
+        e.vy -= 0.006;        // buoyancy — keep rising
+        e.vx *= 0.99;
+        e.life -= 0.014;
+        if (e.life <= 0) continue;
+        const a = e.life * e.life * (0.12 + bright * 0.14);
+        const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.rad + 1.2);
+        gr.addColorStop(0, `rgba(${Math.min(r + 80, 255)},${Math.min(g + 60, 255)},${Math.min(b + 50, 255)},${a})`);
+        gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = gr;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.rad + 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      embers = embers.filter((e) => e.life > 0 && e.y > -20);
       ctx.globalCompositeOperation = "source-over";
 
       raf = requestAnimationFrame(render);

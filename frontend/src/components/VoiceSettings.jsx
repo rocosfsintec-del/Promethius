@@ -96,6 +96,7 @@ function AppearanceTab() {
       <Slider label="Float speed" value={orb.floatSpeed} min={0} max={1.5} step={0.05} onChange={(v) => update({ floatSpeed: v })} />
       <Slider label="Glow intensity" value={orb.lightning} min={0} max={1.5} step={0.05} onChange={(v) => update({ lightning: v })} />
       <Slider label="Thinking chaos" value={orb.chaos} min={0.2} max={2} step={0.05} onChange={(v) => update({ chaos: v })} />
+      <Slider label="Flame density" value={orb.density ?? 1} min={0.4} max={2} step={0.05} onChange={(v) => update({ density: v })} />
       <Slider label="Idle calm ⟶ active" value={orb.idle} min={0.02} max={0.5} step={0.02} onChange={(v) => update({ idle: v })} />
       <div className="flex gap-2">
         <button data-testid="orb-reset-button" onClick={() => update(DEFAULT_ORB)} disabled={saving} className="flex-1 py-2 rounded-lg bg-[#1c1c1f] border border-white/10 text-sm text-zinc-300 disabled:opacity-50">Reset</button>
