@@ -52,38 +52,75 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       const glow = 0.55 + (cfg.lightning ?? 0.9) * 0.6;
       // Brightness rises with heavy thought (energy) and live speech amplitude.
       let bright = Math.min((eff + voiceSmooth * 0.5) * glow, 1.5);
-      // In standby, dim right down to a faint ember — but keep gently floating.
+      // In standby, dim right down to faint embers — but keep gently floating.
       if (standbyRef && standbyRef.current) bright = Math.min(bright, 0.12);
-      const pulse = base * (1 + 0.05 * Math.sin(t * 2.0) + bright * 0.18);
 
-      // Soft outer halo — expands and brightens with energy.
-      const halo = ctx.createRadialGradient(cx, cy, pulse * 0.3, cx, cy, pulse * (2.8 + bright * 1.2));
-      halo.addColorStop(0, `rgba(${Math.min(r + 70, 255)},${Math.min(g + 55, 255)},${Math.min(b + 45, 255)},${0.16 + bright * 0.42})`);
-      halo.addColorStop(0.35, `rgba(${r},${g},${b},${0.10 + bright * 0.22})`);
-      halo.addColorStop(1, "rgba(0,0,10,0)");
-      ctx.fillStyle = halo;
-      ctx.fillRect(0, 0, w, h);
+      const chaos = cfg.chaos ?? 1;
+      const danceSpeed = 0.6 + (cfg.floatSpeed ?? 0.5) * 1.3;
+      // Radius of the (invisible) sphere — gently breathes with thought/voice.
+      const R = base * (1 + 0.04 * Math.sin(t * 1.6) + bright * 0.1);
 
-      // Inner aura ring that swells with thought/voice.
-      const auraR = pulse * (1.5 + bright * 0.5);
-      const aura = ctx.createRadialGradient(cx, cy, pulse * 0.6, cx, cy, auraR);
-      aura.addColorStop(0, `rgba(${Math.min(r + 45, 255)},${Math.min(g + 35, 255)},${Math.min(b + 28, 255)},${0.22 + bright * 0.3})`);
-      aura.addColorStop(1, "rgba(0,0,10,0)");
-      ctx.fillStyle = aura;
+      // Tapered, additive "flame tongue" from a base point out to a tip.
+      const drawFlameTongue = (x0, y0, x1, y1, wBase, alpha) => {
+        const steps = 4;
+        for (let s = 0; s < steps; s++) {
+          const tt = s / (steps - 1);
+          const px = x0 + (x1 - x0) * tt;
+          const py = y0 + (y1 - y0) * tt;
+          const rad = wBase * (1 - tt * 0.82) + 0.6;
+          const a = alpha * (1 - tt) * (1 - tt);
+          if (a <= 0.003) continue;
+          const gg = ctx.createRadialGradient(px, py, 0, px, py, rad);
+          gg.addColorStop(0, `rgba(${Math.min(r + 90, 255)},${Math.min(g + 72, 255)},${Math.min(b + 60, 255)},${a})`);
+          gg.addColorStop(0.5, `rgba(${r},${g},${b},${a * 0.5})`);
+          gg.addColorStop(1, `rgba(${r},${g},${b},0)`);
+          ctx.fillStyle = gg;
+          ctx.beginPath();
+          ctx.arc(px, py, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      };
+
+      // Faint spherical haze so the invisible orb still has a ghostly presence.
+      const haze = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.18);
+      haze.addColorStop(0, `rgba(${r},${g},${b},${0.015 + bright * 0.05})`);
+      haze.addColorStop(0.7, `rgba(${r},${g},${b},${0.008 + bright * 0.03})`);
+      haze.addColorStop(1, "rgba(0,0,10,0)");
+      ctx.fillStyle = haze;
       ctx.beginPath();
-      ctx.arc(cx, cy, auraR, 0, Math.PI * 2);
+      ctx.arc(cx, cy, R * 1.18, 0, Math.PI * 2);
       ctx.fill();
 
-      // Bright core — whiter and fuller as energy/voice rises.
-      const core = ctx.createRadialGradient(cx, cy - pulse * 0.1, 0, cx, cy, pulse);
-      core.addColorStop(0, "rgba(255,255,255,1)");
-      core.addColorStop(0.4 + bright * 0.12, `rgba(${Math.min(r + 95, 255)},${Math.min(g + 78, 255)},${Math.min(b + 62, 255)},${0.9 + bright * 0.1})`);
-      core.addColorStop(0.85, `rgba(${r},${g},${b},${0.68 + bright * 0.22})`);
-      core.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx.fillStyle = core;
-      ctx.beginPath();
-      ctx.arc(cx, cy, pulse, 0, Math.PI * 2);
-      ctx.fill();
+      // Ghost flames licking around the sphere's rim/surface (additive glow).
+      ctx.globalCompositeOperation = "lighter";
+      const flameBright = 0.1 + bright * 0.5;
+      const N = 24;
+      for (let i = 0; i < N; i++) {
+        const a0 = (i / N) * Math.PI * 2;
+        const sway = Math.sin(t * danceSpeed + i * 1.3) * 0.13 * chaos;
+        const a = a0 + sway;
+        const flick = 0.35 + 0.65 * Math.abs(Math.sin(t * (2.4 + danceSpeed) * chaos + i * 4.7));
+        const len = R * (0.16 + 0.55 * flick * (0.45 + eff));
+        const bx = cx + Math.cos(a) * R;
+        const by = cy + Math.sin(a) * R;
+        const tang = a + Math.PI / 2;
+        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.4 * chaos;
+        const tipx = bx + Math.cos(a) * len + Math.cos(tang) * swayAmt;
+        const tipy = by + Math.sin(a) * len + Math.sin(tang) * swayAmt;
+        drawFlameTongue(bx, by, tipx, tipy, R * 0.12 * (0.6 + flick), flameBright);
+      }
+      // A few faint licks across the FRONT surface so it feels wrapped in fire.
+      const M = 9;
+      for (let i = 0; i < M; i++) {
+        const ang = t * 0.35 * danceSpeed + i * ((Math.PI * 2) / M);
+        const rr = R * (0.28 + 0.55 * Math.abs(Math.sin(t * 0.7 + i * 1.7)));
+        const bx = cx + Math.cos(ang) * rr;
+        const by = cy + Math.sin(ang) * rr;
+        const flick = Math.abs(Math.sin(t * 3.6 * chaos + i * 2.3));
+        const len = R * 0.13 * (0.5 + eff);
+        drawFlameTongue(bx, by, bx + Math.sin(t * 2 + i) * len * 0.5, by - len * (0.5 + flick), R * 0.06, flameBright * 0.55);
+      }
+      ctx.globalCompositeOperation = "source-over";
 
       raf = requestAnimationFrame(render);
     };
