@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette, KeyRound, Sparkles } from "lucide-react";
+import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette, KeyRound, Sparkles, Github, ExternalLink } from "lucide-react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -282,6 +282,84 @@ function SecurityTab() {
   );
 }
 
+function GithubKeyCard() {
+  const [status, setStatus] = useState(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => api.get("/github/status").then((r) => setStatus(r.data)).catch(() => setStatus({ connected: false }));
+  useEffect(() => { load(); }, []);
+
+  const connect = async () => {
+    if (!token.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/github/token", { token: token.trim() });
+      toast.success(`Connected as @${r.data.login}`);
+      setToken(""); load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Invalid token"); }
+    finally { setBusy(false); }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    try { await api.delete("/github/token"); toast.success("GitHub disconnected"); load(); }
+    catch { toast.error("Failed to disconnect"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div data-testid="github-token-card" className="rounded-xl border border-white/5 bg-[#16161c] p-3">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <Github size={15} className="text-zinc-300" />
+          <span className="text-sm text-zinc-200">GitHub</span>
+          {status?.connected ? (
+            <span data-testid="github-token-status" className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+              <Check size={10} /> @{status.login}
+            </span>
+          ) : (
+            <span data-testid="github-token-status" className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/10">not connected</span>
+          )}
+        </div>
+        {status?.connected && (
+          <button data-testid="settings-github-disconnect" onClick={disconnect} disabled={busy}
+            className="text-zinc-600 hover:text-red-400 transition-colors" title="Disconnect">
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-2 flex items-center gap-1 flex-wrap">
+        Lets Promethius commit &amp; push (including self-update).
+        <a href="https://github.com/settings/tokens/new" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline inline-flex items-center gap-0.5">
+          Create a token <ExternalLink size={10} />
+        </a>
+        <span className="text-zinc-600">(scope: repo)</span>
+      </p>
+      {!status ? (
+        <div className="flex justify-center py-2"><Loader2 size={14} className="animate-spin text-orange-500" /></div>
+      ) : status.connected ? null : (
+        <div className="flex gap-2">
+          <input
+            data-testid="settings-github-token-input"
+            type="password"
+            autoComplete="off"
+            placeholder="ghp_… or github_pat_…"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && connect()}
+            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-zinc-100 focus:outline-none focus:border-orange-500/50"
+          />
+          <button data-testid="settings-github-connect" onClick={connect} disabled={busy || !token.trim()}
+            className="px-3.5 rounded-lg bg-zinc-100 text-black text-sm font-medium hover:bg-white disabled:opacity-40 flex items-center gap-1.5">
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Github size={14} />} Connect
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ApiKeysTab() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -331,6 +409,7 @@ function ApiKeysTab() {
       {!isAdmin && (
         <p className="text-xs text-amber-400/80">Only the owner (admin) can change API keys. These are shown read-only.</p>
       )}
+      <GithubKeyCard />
       {KEY_FIELDS.map((f) => {
         const set = status[f.id]?.set;
         return (
