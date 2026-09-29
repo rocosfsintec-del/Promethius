@@ -4,7 +4,7 @@ import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { DEFAULT_ORB, ORB_PRESETS, ORB_MOODS } from "../lib/orbConfig";
+import { DEFAULT_ORB, ORB_PRESETS, ORB_TIP_PRESETS, ORB_MOODS } from "../lib/orbConfig";
 import InstallButton from "./InstallButton";
 
 const TABS = [
@@ -90,6 +90,22 @@ function AppearanceTab() {
           <input data-testid="orb-color-custom" type="color" value={orb.color} onChange={(e) => update({ color: e.target.value })}
             className="h-8 w-12 bg-transparent border border-white/10 rounded cursor-pointer" />
           <span className="font-mono text-xs text-zinc-500">{orb.color}</span>
+        </div>
+      </div>
+      <div>
+        <p className="text-xs text-zinc-400 mb-2">Flame tips <span className="text-zinc-600">— cooler colour blended into the tips</span></p>
+        <div className="grid grid-cols-3 gap-2">
+          {ORB_TIP_PRESETS.map((p) => (
+            <button key={p.color} data-testid={`orb-tip-${p.color}`} onClick={() => update({ tipColor: p.color })}
+              className={`h-9 rounded-lg border transition-all ${(orb.tipColor || DEFAULT_ORB.tipColor) === p.color ? "border-white scale-105" : "border-white/10"}`}
+              style={{ background: `linear-gradient(to top, ${orb.color}, ${p.color})` }} title={p.label} />
+          ))}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-xs text-zinc-500">Custom</span>
+          <input data-testid="orb-tip-custom" type="color" value={orb.tipColor || DEFAULT_ORB.tipColor} onChange={(e) => update({ tipColor: e.target.value })}
+            className="h-8 w-12 bg-transparent border border-white/10 rounded cursor-pointer" />
+          <span className="font-mono text-xs text-zinc-500">{orb.tipColor || DEFAULT_ORB.tipColor}</span>
         </div>
       </div>
       <Slider label="Size" value={orb.size} min={0.1} max={0.24} step={0.005} onChange={(v) => update({ size: v })} />

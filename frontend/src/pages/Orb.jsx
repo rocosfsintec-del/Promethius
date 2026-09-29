@@ -20,6 +20,7 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
     let voiceSmooth = 0;
     let flare = 0;        // fast-attack / slow-release envelope for syllable flares
     let embers = [];      // faint rising ember particles that drift off the flames
+    let pool = 0;         // eased firelight glow that gathers beneath the orb
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -33,7 +34,9 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
     const render = () => {
       const cfg = configRef.current || DEFAULT_ORB;
       let { r, g, b } = hexToRgb(cfg.color);
-      if (flashRef && flashRef.current > Date.now()) { r = 34; g = 211; b = 120; }
+      const tipC = hexToRgb(cfg.tipColor || cfg.color);
+      let tr = tipC.r, tg = tipC.g, tb = tipC.b;
+      if (flashRef && flashRef.current > Date.now()) { r = 34; g = 211; b = 120; tr = 34; tg = 211; tb = 120; }
       t += 0.016;
       const target = energyRef.current;
       smooth += (target - smooth) * 0.08;
@@ -75,10 +78,12 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
           const rad = wBase * (1 - tt * 0.82) + 0.6;
           const a = alpha * (1 - tt) * (1 - tt);
           if (a <= 0.003) continue;
+          // Blend the hot core colour at the root into the cooler tip colour.
+          const cr = r + (tr - r) * tt, cg = g + (tg - g) * tt, cb = b + (tb - b) * tt;
           const gg = ctx.createRadialGradient(px, py, 0, px, py, rad);
-          gg.addColorStop(0, `rgba(${Math.min(r + 90, 255)},${Math.min(g + 72, 255)},${Math.min(b + 60, 255)},${a})`);
-          gg.addColorStop(0.5, `rgba(${r},${g},${b},${a * 0.5})`);
-          gg.addColorStop(1, `rgba(${r},${g},${b},0)`);
+          gg.addColorStop(0, `rgba(${Math.min(cr + 90, 255)},${Math.min(cg + 72, 255)},${Math.min(cb + 60, 255)},${a})`);
+          gg.addColorStop(0.5, `rgba(${cr},${cg},${cb},${a * 0.5})`);
+          gg.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
           ctx.fillStyle = gg;
           ctx.beginPath();
           ctx.arc(px, py, rad, 0, Math.PI * 2);
@@ -95,6 +100,26 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       ctx.beginPath();
       ctx.arc(cx, cy, R * 1.18, 0, Math.PI * 2);
       ctx.fill();
+
+      // Ember glow pool — firelight gathering beneath the orb (eases in, lingers).
+      const poolTarget = Math.min(bright * 0.55 + flare * 0.5 + embers.length / 140, 1);
+      pool += (poolTarget - pool) * (poolTarget > pool ? 0.05 : 0.02);
+      if (pool > 0.01) {
+        const pw = R * 2.6;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.translate(cx, cy + R * 1.55);
+        ctx.scale(1, 0.26);
+        const pg = ctx.createRadialGradient(0, 0, 0, 0, 0, pw);
+        pg.addColorStop(0, `rgba(${Math.min(r + 45, 255)},${Math.min(g + 32, 255)},${Math.min(b + 26, 255)},${0.03 + pool * 0.2})`);
+        pg.addColorStop(0.6, `rgba(${r},${g},${b},${0.015 + pool * 0.08})`);
+        pg.addColorStop(1, "rgba(0,0,10,0)");
+        ctx.fillStyle = pg;
+        ctx.beginPath();
+        ctx.arc(0, 0, pw, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
 
       // Ghost flames licking around the sphere's rim/surface (additive glow).
       ctx.globalCompositeOperation = "lighter";
@@ -147,6 +172,16 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
           });
         }
       }
+      // Idle whisper — a few lone embers rise slowly even at rest, so it's never fully still.
+      if (tips.length && Math.random() < 0.03) {
+        const tip = tips[(Math.random() * tips.length) | 0];
+        embers.push({
+          x: tip.x, y: tip.y,
+          vx: (Math.random() - 0.5) * 0.15,
+          vy: -(0.12 + Math.random() * 0.18),
+          life: 1, rad: 0.7 + Math.random() * 1,
+        });
+      }
       if (embers.length > 100) embers = embers.slice(embers.length - 100);
       for (const e of embers) {
         e.x += e.vx;
@@ -157,8 +192,8 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
         if (e.life <= 0) continue;
         const a = e.life * e.life * (0.12 + bright * 0.14);
         const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.rad + 1.2);
-        gr.addColorStop(0, `rgba(${Math.min(r + 80, 255)},${Math.min(g + 60, 255)},${Math.min(b + 50, 255)},${a})`);
-        gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        gr.addColorStop(0, `rgba(${Math.min(tr + 80, 255)},${Math.min(tg + 60, 255)},${Math.min(tb + 50, 255)},${a})`);
+        gr.addColorStop(1, `rgba(${tr},${tg},${tb},0)`);
         ctx.fillStyle = gr;
         ctx.beginPath();
         ctx.arc(e.x, e.y, e.rad + 1.2, 0, Math.PI * 2);
