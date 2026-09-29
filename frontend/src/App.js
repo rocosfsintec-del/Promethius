@@ -39,6 +39,7 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginRoute />} />
+            <Route path="/auth" element={<Navigate to="/login" replace />} />
             <Route path="/install" element={<InstallGuide />} />
             <Route
               path="/"

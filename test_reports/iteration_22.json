@@ -1,0 +1,33 @@
+{
+  "summary": "PASS. End-to-end verified Promethius chat + API-key management. Backend: all 6 pytest cases green (chat via Universal Key for gpt-4o-mini, Anthropic claude-sonnet-4-6 routed through the proxy, PDF tool-calling loop returns /api/files/*.pdf link, GET/PUT /api/settings/keys shape + persistence + non-admin 403). Frontend: WebAuthn passkey registration via CDP virtual authenticator on /login worked, user redirected to '/' Orb, /chat rendered assistant reply 'I am Promethius, your personal AI…' via Universal Key, Settings > API tab shows Universal Key banner ('Chat is ready out of the box …'), all six apikey-input-* + apikey-status-* elements, and the correct read-only mode for non-admin (save-apikeys-button intentionally hidden by ApiKeysTab when role !== 'admin'; backend PUT already covered admin flow).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Auth route", "issues": ["Playbook mentions /auth path, but the actual React route is /login (App.js). Any external docs/redirects pointing at /auth will 404 into an empty <App/> shell. Consider adding a <Route path=\"/auth\" element={<Navigate to=\"/login\" replace/>}/> alias."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_chat_and_keys.py",
+    "/app/test_reports/pytest/iter22.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: alias /auth -> /login in App.js routes to match the playbook and any legacy links (non-blocking).",
+    "OPTIONAL: The Settings > API tab hides save-apikeys-button for non-admin. That's correct; if you need a UI-side admin verification with save-apikeys-button visible, run the same test using the seeded admin owner@example.com (currently no passkey, only password) — either seed a passkey for the admin or add a dev-only password login form."
+  ],
+  "critical_code_review_comments": [
+    "server.py L1417-1418: chat_ready correctly OR's OpenAI key with EMERGENT_LLM_KEY — chat truly works out-of-the-box.",
+    "server.py L1427-1444 (set_keys): admin-guarded, empty string resets to env default via _apply_key + _ENV_KEY_DEFAULTS, non-empty encrypted via _gh_fernet. Persistence verified.",
+    "VoiceSettings.jsx ApiKeysTab hides save button when user.role !== 'admin' — safe UX, matches backend require_admin.",
+    "Auth.jsx uses data-testid consistently. Passkey register/login through webauthn library on WEBAUTHN_EXPECTED_ORIGIN worked with CDP virtual authenticator (protocol=ctap2, internal, RK+UV)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% of in-scope flows (register→Orb, chat reply, API tab renders with 6 fields + statuses + banner)"},
+  "test_credentials": "Admin (API only): owner@example.com / Prometheus#2026. UI passkey user created this run: iter22ui_1790719579@example.com (role=user, second registrant).",
+  "seed_data_creation": "Created one non-admin passkey user (iter22ui_1790719579@example.com) and one throwaway tester_<uuid>@example.com used for the 403 test. No external side effects (no GitHub commits, no real 3rd-party keys stored — only dummy 'tvly-test123456' that was set-then-cleared inside the persistence test).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Pytest suite at /app/backend/tests/test_iter22_chat_and_keys.py is a good regression harness for future changes to /api/chat, /api/settings/keys and Universal Key routing. Frontend Auth page lives at /login (not /auth). To CDP-register a passkey use protocol=ctap2, transport=internal, hasResidentKey=true, hasUserVerification=true, isUserVerified=true, automaticPresenceSimulation=true, then click auth-toggle-mode → fill auth-name-input + auth-email-input (use example.com; .local is rejected) → auth-submit-button. Chat reply typically returns within ~4-6s.",
+  "rca of the issue": "N/A — no bugs surfaced."
+}
