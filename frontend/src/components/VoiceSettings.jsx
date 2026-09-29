@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette } from "lucide-react";
+import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette, KeyRound, Sparkles } from "lucide-react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import api from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { DEFAULT_ORB, ORB_PRESETS, ORB_MOODS } from "../lib/orbConfig";
 import InstallButton from "./InstallButton";
 
@@ -11,7 +12,17 @@ const TABS = [
   { id: "appearance", label: "Orb", icon: Palette },
   { id: "directives", label: "Laws", icon: ScrollText },
   { id: "people", label: "People", icon: Users },
+  { id: "api", label: "API", icon: KeyRound },
   { id: "security", label: "Keys", icon: Fingerprint },
+];
+
+const KEY_FIELDS = [
+  { id: "openai", label: "OpenAI", hint: "Chat, image, Whisper & TTS" },
+  { id: "anthropic", label: "Anthropic", hint: "Claude chat models" },
+  { id: "elevenlabs", label: "ElevenLabs", hint: "Premium voice (TTS & STT)" },
+  { id: "fal", label: "fal.ai", hint: "Video generation" },
+  { id: "tavily", label: "Tavily", hint: "Live web search" },
+  { id: "resend", label: "Resend", hint: "Email / account recovery" },
 ];
 
 function Slider({ label, value, min, max, step, onChange }) {
@@ -271,6 +282,104 @@ function SecurityTab() {
   );
 }
 
+function ApiKeysTab() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [status, setStatus] = useState(null);
+  const [vals, setVals] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const load = () => api.get("/settings/keys").then((r) => setStatus(r.data)).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    const payload = {};
+    Object.entries(vals).forEach(([k, v]) => { if (v && v.trim()) payload[k] = v.trim(); });
+    if (Object.keys(payload).length === 0) { toast.info("Enter a key first"); return; }
+    setSaving(true);
+    try {
+      const r = await api.put("/settings/keys", payload);
+      setStatus(r.data); setVals({}); toast.success("API keys saved");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
+    finally { setSaving(false); }
+  };
+
+  const clear = async (id) => {
+    setSaving(true);
+    try {
+      const r = await api.put("/settings/keys", { [id]: "" });
+      setStatus(r.data); setVals((v) => ({ ...v, [id]: "" })); toast.success("Key removed");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+    finally { setSaving(false); }
+  };
+
+  if (!status) return <div className="flex justify-center py-8"><Loader2 className="animate-spin text-orange-500" /></div>;
+
+  const universalOn = status.universal_key?.set;
+
+  return (
+    <div className="space-y-4" data-testid="apikeys-tab">
+      {universalOn && (
+        <div className="flex items-start gap-2 text-xs leading-relaxed rounded-xl border border-orange-500/25 bg-orange-500/10 p-3">
+          <Sparkles size={14} className="text-orange-400 mt-0.5 shrink-0" />
+          <span className="text-orange-200/90">
+            Chat is <span className="font-semibold">ready out of the box</span> via the built-in Emergent Universal Key —
+            it powers OpenAI and Claude models with no setup. Paste your own keys below only if you'd rather use your own accounts.
+          </span>
+        </div>
+      )}
+      {!isAdmin && (
+        <p className="text-xs text-amber-400/80">Only the owner (admin) can change API keys. These are shown read-only.</p>
+      )}
+      {KEY_FIELDS.map((f) => {
+        const set = status[f.id]?.set;
+        return (
+          <div key={f.id} className="rounded-xl border border-white/5 bg-[#16161c] p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-zinc-200">{f.label}</span>
+                {set ? (
+                  <span data-testid={`apikey-status-${f.id}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                    {status[f.id]?.masked || "set"}
+                  </span>
+                ) : (
+                  <span data-testid={`apikey-status-${f.id}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/10">not set</span>
+                )}
+              </div>
+              {set && isAdmin && (
+                <button data-testid={`apikey-clear-${f.id}`} onClick={() => clear(f.id)} disabled={saving}
+                  className="text-zinc-600 hover:text-red-400 transition-colors" title="Remove key">
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-500 mb-2">{f.hint}</p>
+            <input
+              data-testid={`apikey-input-${f.id}`}
+              type="password"
+              autoComplete="off"
+              disabled={!isAdmin}
+              placeholder={set ? "•••••••• (saved — paste to replace)" : `Paste your ${f.label} key`}
+              value={vals[f.id] || ""}
+              onChange={(e) => setVals((v) => ({ ...v, [f.id]: e.target.value }))}
+              className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-zinc-100 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
+            />
+          </div>
+        );
+      })}
+      {isAdmin && (
+        <button data-testid="save-apikeys-button" onClick={save} disabled={saving}
+          className="w-full py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60">
+          {saving ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Save API Keys
+        </button>
+      )}
+      <p className="text-[11px] text-zinc-600 leading-relaxed">
+        Keys are encrypted at rest and never sent back to the browser. Leave a field blank to keep the current value.
+      </p>
+    </div>
+  );
+}
+
 export default function VoiceSettings({ onClose }) {
   const [tab, setTab] = useState("voice");
   return (
@@ -281,7 +390,7 @@ export default function VoiceSettings({ onClose }) {
           <button data-testid="close-settings-button" onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X size={18} /></button>
         </div>
         <div className="px-4 pt-3">
-          <div className="grid grid-cols-5 gap-1 bg-[#16161c] rounded-lg p-1">
+          <div className="grid grid-cols-6 gap-1 bg-[#16161c] rounded-lg p-1">
             {TABS.map((t) => (
               <button key={t.id} data-testid={`settings-tab-${t.id}`} onClick={() => setTab(t.id)}
                 className={`flex flex-col items-center justify-center gap-1 py-2 rounded-md text-[10px] transition-colors ${tab === t.id ? "bg-orange-500/15 text-orange-400" : "text-zinc-500 hover:text-zinc-200"}`}>
@@ -295,6 +404,7 @@ export default function VoiceSettings({ onClose }) {
           {tab === "appearance" && <AppearanceTab />}
           {tab === "directives" && <DirectivesTab />}
           {tab === "people" && <PeopleTab />}
+          {tab === "api" && <ApiKeysTab />}
           {tab === "security" && <SecurityTab />}
         </div>
         <div className="px-4 py-3 border-t border-white/5">

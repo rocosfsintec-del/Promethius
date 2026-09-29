@@ -30,8 +30,25 @@ User asked to pull the repo into a fresh workspace and repair it.
 - Open app at http://localhost:3000 (frontend). Backend runs on 8001.
 - backend/.env needs: MONGO_URL, DB_NAME, JWT_SECRET, CORS_ORIGINS, and any LLM keys.
 
+## Work done (2026-06 — pull & repair by E1)
+- Repo re-cloned into fresh workspace; boot was crashing on missing `.env` files.
+- Recreated backend/.env (MONGO_URL, DB_NAME, JWT_SECRET, CORS, WebAuthn origins) and
+  frontend/.env (REACT_APP_BACKEND_URL, WDS_SOCKET_PORT). Backend now boots, passkey login renders.
+- **Chat made functional end-to-end WITHOUT requiring user keys**: wired the Emergent
+  Universal Key via the OpenAI-compatible proxy (INTEGRATION_PROXY_URL + '/llm').
+  `openai_client()` now: Ollama→local; native OpenAI key→direct; otherwise→Universal Key proxy.
+  The proxy serves OpenAI *and* Anthropic model names, so `anthropic` provider routes through
+  the same OpenAI path (with OpenAI tool schema) when no native Anthropic key is set.
+  Verified via API: gpt-4o-mini, claude-sonnet-4-6, and the generate_pdf tool loop all work.
+- **In-app API keys panel (BYO keys)**: new `db.app_config` doc "secrets" stores per-service keys
+  (openai, anthropic, elevenlabs, fal, tavily, resend) encrypted with Fernet (JWT_SECRET-derived).
+  Endpoints: GET /api/settings/keys (masked status + chat_ready), PUT /api/settings/keys (admin only,
+  live-updates module globals, revert-to-env on clear). Loaded on startup via load_stored_keys().
+  Frontend: Settings → "API" tab (VoiceSettings.jsx ApiKeysTab) to paste/replace/clear keys.
+- image/tts/whisper/edit now also honor pasted OpenAI key / Universal Key fallback.
+
 ## Backlog / next
-- P1: Chat requires an LLM key (ANTHROPIC_API_KEY / OPENAI_API_KEY) or local Ollama.
+- P1: Anthropic-native tool path only used when a real ANTHROPIC_API_KEY is set (else proxy).
 - P1: Push repaired baseline back to existing GitHub repo (no delete needed).
 - P2: Review the self-modification/GitHub feature that caused the break to add guardrails.
 

@@ -71,6 +71,50 @@ DEFAULT_PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o-mini"
 scheduler = AsyncIOScheduler()
 
+# --- Emergent Universal Key (zero-config LLM fallback via OpenAI-compatible proxy) ---
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY') or ''
+INTEGRATION_PROXY_URL = os.environ.get('INTEGRATION_PROXY_URL', 'https://integrations.emergentagent.com')
+EMERGENT_LLM_BASE = INTEGRATION_PROXY_URL.rstrip('/') + '/llm'
+
+# --- Runtime-configurable API keys (users can paste their own in Settings) ---
+# Each field maps to the module global the rest of the code already reads.
+SECRET_FIELDS = ("openai", "anthropic", "elevenlabs", "fal", "tavily", "resend")
+_SECRET_TO_GLOBAL = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "elevenlabs": "ELEVENLABS_API_KEY",
+    "fal": "FAL_KEY",
+    "tavily": "TAVILY_API_KEY",
+    "resend": "RESEND_API_KEY",
+}
+# Snapshot of the env defaults, so clearing a pasted key reverts to env (not blank).
+_ENV_KEY_DEFAULTS = {f: (globals().get(g) or '') for f, g in _SECRET_TO_GLOBAL.items()}
+
+
+def _apply_key(field: str, value):
+    g = _SECRET_TO_GLOBAL.get(field)
+    if g:
+        globals()[g] = value or ''
+
+
+async def load_stored_keys():
+    """Load pasted-in API keys from db.app_config and apply to module globals."""
+    try:
+        doc = await db.app_config.find_one({"id": "secrets"})
+    except Exception as e:
+        logger.error(f"load keys failed: {e}")
+        return
+    if not doc:
+        return
+    for f in SECRET_FIELDS:
+        enc = doc.get(f)
+        if not enc:
+            continue
+        try:
+            _apply_key(f, _gh_fernet.decrypt(enc.encode()).decode())
+        except Exception as e:
+            logger.error(f"key decrypt {f}: {e}")
+
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
@@ -565,9 +609,18 @@ async def recovery_verify(req: RecoveryVerifyReq):
 # LLM core
 # ---------------------------------------------------------------------------
 def openai_client(provider: str):
+    # Local offline models via Ollama's OpenAI-compatible endpoint.
     if provider == "ollama":
         return AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)
-    return AsyncOpenAI(api_key=OPENAI_API_KEY)
+    # Native OpenAI key (pasted or env) takes priority for OpenAI models.
+    if provider == "openai" and OPENAI_API_KEY:
+        return AsyncOpenAI(api_key=OPENAI_API_KEY)
+    # Otherwise fall back to the Emergent Universal Key via its OpenAI-compatible
+    # proxy. This serves both OpenAI *and* Anthropic model names (LiteLLM routes
+    # by model name), so chat works with zero configuration.
+    if EMERGENT_LLM_KEY:
+        return AsyncOpenAI(api_key=EMERGENT_LLM_KEY, base_url=EMERGENT_LLM_BASE)
+    return AsyncOpenAI(api_key=OPENAI_API_KEY or "missing")
 
 
 async def get_or_create_conversation_summary(conv_id: str, history: list) -> str:
@@ -763,7 +816,7 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
     if doc_text:
         user_text = f"{user_text}\n\nAttached documents:\n{doc_text}"
 
-    if provider == "anthropic":
+    if provider == "anthropic" and ANTHROPIC_API_KEY:
         clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
         msgs = [{"role": m["role"], "content": m["content"]} for m in history[:-1]]
 
@@ -1207,10 +1260,10 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
             hist = history
             if doc_text:
                 hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
-            if req.provider == "openai":
-                reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid)
-            else:
+            if req.provider == "anthropic" and ANTHROPIC_API_KEY:
                 reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
+            else:
+                reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid)
         else:
             reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
     except Exception as e:
@@ -1268,7 +1321,7 @@ async def transcribe(file: UploadFile = File(...), user=Depends(get_current_user
             return {"text": text}
         except Exception as e:
             logger.error(f"elevenlabs stt error {e}")
-    clt = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    clt = openai_client("openai")
     buf = BytesIO(data)
     buf.name = file.filename or "audio.webm"
     out = await clt.audio.transcriptions.create(model="whisper-1", file=buf)
@@ -1290,7 +1343,7 @@ async def tts(req: TTSReq, user=Depends(get_current_user)):
             return Response(content=audio, media_type="audio/mpeg")
         except Exception as e:
             logger.error(f"elevenlabs error {e}")
-    clt = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    clt = openai_client("openai")
     resp = await clt.audio.speech.create(model="tts-1", voice="alloy", input=text[:4000])
     audio = resp.read() if hasattr(resp, "read") else resp.content
     return Response(content=audio, media_type="audio/mpeg")
@@ -1334,6 +1387,61 @@ async def get_directives(user=Depends(get_current_user)):
 async def set_directives(req: DirectivesReq, user=Depends(get_current_user)):
     await db.users.update_one({"id": user["id"]}, {"$set": {"directives": req.content}})
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# API key management (paste your own keys in-app; stored encrypted at rest)
+# ---------------------------------------------------------------------------
+class KeysReq(BaseModel):
+    openai: Optional[str] = None
+    anthropic: Optional[str] = None
+    elevenlabs: Optional[str] = None
+    fal: Optional[str] = None
+    tavily: Optional[str] = None
+    resend: Optional[str] = None
+
+
+def _mask_key(v) -> str:
+    v = str(v or "")
+    if not v:
+        return ""
+    return (v[:3] + "…" + v[-4:]) if len(v) > 9 else "•••"
+
+
+def _keys_status() -> dict:
+    out = {}
+    for f, g in _SECRET_TO_GLOBAL.items():
+        val = globals().get(g) or ""
+        out[f] = {"set": bool(val), "masked": _mask_key(val)}
+    # Chat works out-of-the-box whenever a usable OpenAI key OR the universal key exists.
+    out["universal_key"] = {"set": bool(EMERGENT_LLM_KEY)}
+    out["chat_ready"] = bool((globals().get("OPENAI_API_KEY") or "") or EMERGENT_LLM_KEY)
+    return out
+
+
+@api_router.get("/settings/keys")
+async def get_keys(user=Depends(get_current_user)):
+    return _keys_status()
+
+
+@api_router.put("/settings/keys")
+async def set_keys(req: KeysReq, user=Depends(require_admin)):
+    doc = await db.app_config.find_one({"id": "secrets"}, {"_id": 0}) or {"id": "secrets"}
+    payload = req.model_dump()
+    for f in SECRET_FIELDS:
+        v = payload.get(f)
+        if v is None:
+            continue  # field omitted -> leave unchanged
+        v = v.strip()
+        if v == "":
+            # explicit clear -> drop stored value and revert to env default
+            doc.pop(f, None)
+            _apply_key(f, _ENV_KEY_DEFAULTS.get(f, ""))
+        else:
+            doc[f] = _gh_fernet.encrypt(v.encode()).decode()
+            _apply_key(f, v)
+    await db.app_config.update_one({"id": "secrets"}, {"$set": doc}, upsert=True)
+    return _keys_status()
 
 
 # ---------------------------------------------------------------------------
@@ -1410,7 +1518,7 @@ async def list_voices(user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 @api_router.post("/image/generate")
 async def gen_image(req: ImageReq, user=Depends(get_current_user)):
-    clt = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    clt = openai_client("openai")
     try:
         result = await clt.images.generate(model="gpt-image-1", prompt=req.prompt, size="1024x1024")
         b64 = result.data[0].b64_json
@@ -1457,7 +1565,7 @@ async def gen_video(req: VideoReq, user=Depends(get_current_user)):
 
 @api_router.post("/image/edit")
 async def edit_image(file: UploadFile = File(...), prompt: str = Form(...), user=Depends(get_current_user)):
-    clt = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    clt = openai_client("openai")
     data = await file.read()
     buf = BytesIO(data)
     buf.name = file.filename or "image.png"
@@ -2208,6 +2316,11 @@ async def startup():
         logger.info(f"Local storage ready at {STORAGE_DIR}")
     except Exception as e:
         logger.error(f"Storage init failed: {e}")
+    try:
+        await load_stored_keys()
+        logger.info("API keys loaded from store")
+    except Exception as e:
+        logger.error(f"Key load failed: {e}")
     try:
         jobs = await db.scheduled.find({}, {"_id": 0}).to_list(500)
         for j in jobs:

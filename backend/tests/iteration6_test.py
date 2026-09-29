@@ -4,7 +4,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://video-genesis-25.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://prom-metrics.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = "admin@promethius.ai"
 ADMIN_PASSWORD = "Fire2026!"
 
