@@ -2305,13 +2305,81 @@ async def gh_commit(req: GithubCommitReq, user=Depends(get_current_user)):
     result = {"commit_sha": new_sha, "branch": req.branch,
               "commit_url": f"https://github.com/{owner}/{repo}/commit/{new_sha}"}
     if req.open_pr and req.branch != base:
-        body = req.pr_body or await _generate_pr_summary(req.message, req.files)
+        if req.pr_body:
+            body = req.pr_body
+        else:
+            changes = await _collect_changes(token, owner, repo, base, req.files)
+            body = await _summarize_changes(req.message, changes)
+        body = body.rstrip() + "\n\n---\n_Change summary written by Promethius._"
         pr = await _gh(token, "POST", f"/repos/{owner}/{repo}/pulls",
                        json={"title": req.pr_title or req.message, "body": body,
                              "head": req.branch, "base": base})
         result["pr_url"] = pr.json().get("html_url")
         result["pr_number"] = pr.json().get("number")
     return result
+
+
+async def _fetch_old_content(token, owner, repo, base_branch, path):
+    """Old text of a file on the base branch. ('', 'added') if it doesn't exist."""
+    try:
+        r = await _gh(token, "GET", f"/repos/{owner}/{repo}/contents/{path}", params={"ref": base_branch})
+        data = r.json()
+        if isinstance(data, dict) and data.get("type") == "file":
+            try:
+                return base64.b64decode(data["content"].replace("\n", "")).decode("utf-8"), "modified"
+            except Exception:
+                return "", "binary"
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+    return "", "added"
+
+
+async def _collect_changes(token, owner, repo, base_branch, files):
+    """Only the files that actually differ from the base branch."""
+    changes = []
+    for f in files:
+        path = f.path.lstrip("/")
+        old, status = await _fetch_old_content(token, owner, repo, base_branch, path)
+        if status == "binary" or old == f.content:
+            continue
+        changes.append({"path": path, "status": status, "old": old, "new": f.content})
+    return changes
+
+
+def _compact_diff(old, new, max_lines=60):
+    import difflib
+    body = [l for l in difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=1)
+            if not (l.startswith("---") or l.startswith("+++"))]
+    if len(body) > max_lines:
+        body = body[:max_lines] + [f"... (+{len(body) - max_lines} more diff lines)"]
+    return "\n".join(body)
+
+
+async def _summarize_changes(message, changes):
+    """Plain-English PR description generated from the real diffs."""
+    if not changes:
+        return f"{message}\n\n_No file changes detected against the base branch._"
+    listing = "\n".join(f"- `{c['path']}` ({c['status']})" for c in changes)
+    blocks, budget = [], 12000
+    for c in changes:
+        block = f"### {c['path']} ({c['status']})\n```diff\n{_compact_diff(c['old'], c['new'])}\n```"
+        if len(block) > budget:
+            blocks.append(f"### {c['path']} ({c['status']}) — diff omitted (length budget)")
+            continue
+        budget -= len(block)
+        blocks.append(block)
+    sys_p = ("You are a senior engineer writing a clear, plain-English pull request description for a "
+             "non-technical reader. From the intent and the ACTUAL diffs, explain WHAT changed and WHY it "
+             "matters. Use markdown: one or two summary sentences, then a short bullet list grouped by area. "
+             "Avoid jargon, don't just restate code, keep it to ~12 bullets max.")
+    prompt = f"Intent / commit message: {message}\n\nChanged files:\n{listing}\n\nDiffs:\n" + "\n\n".join(blocks)
+    try:
+        txt = (await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}]) or "").strip()
+    except Exception as e:
+        logger.error(f"change summary llm: {e}")
+        txt = ""
+    return txt or f"{message}\n\n**Changed files:**\n{listing}"
 
 
 async def _generate_pr_summary(message, files):
@@ -2360,6 +2428,29 @@ async def gh_diff(req: GhDiffReq, user=Depends(get_current_user)):
                 raise
         out.append({"path": f.path, "status": status, "old": old, "new": f.content})
     return out
+
+
+class ChangeSummaryReq(BaseModel):
+    owner: str
+    repo: str
+    base_branch: str
+    message: Optional[str] = "Update from Promethius"
+    files: List[GhFile]
+
+
+@api_router.post("/github/change-summary")
+async def gh_change_summary(req: ChangeSummaryReq, user=Depends(get_current_user)):
+    """Plain-English summary of what changed vs the base branch — for PR preview."""
+    token = await _gh_token(user["id"])
+    changes = await _collect_changes(token, req.owner, req.repo, req.base_branch, req.files)
+    summary = await _summarize_changes(req.message, changes)
+    return {
+        "summary": summary,
+        "changed": [c["path"] for c in changes],
+        "changed_count": len(changes),
+        "total": len(req.files),
+        "unchanged_count": len(req.files) - len(changes),
+    }
 
 
 app.include_router(api_router)

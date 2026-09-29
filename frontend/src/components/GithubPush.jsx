@@ -102,6 +102,29 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
   const [expanded, setExpanded] = useState({});
   const [selfConfig, setSelfConfig] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [summaryText, setSummaryText] = useState("");
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryStats, setSummaryStats] = useState(null);
+
+  const genSummary = useCallback(async () => {
+    if (!repo || files.length === 0) return;
+    setSummaryLoading(true);
+    try {
+      const r = await api.post("/github/change-summary", {
+        owner: repo.owner,
+        repo: repo.name,
+        base_branch: createBranch ? repo.default_branch : branch.trim(),
+        message: message.trim(),
+        files: files.map((f) => ({ path: f.path.trim(), content: f.content })),
+      });
+      setSummaryText(r.data.summary || "");
+      setSummaryStats({ changed: r.data.changed_count, total: r.data.total });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not generate summary");
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [repo, files, createBranch, branch, message]);
 
   const loadSelfConfig = async () => {
     try {
@@ -180,6 +203,13 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
     })();
     return () => { cancelled = true; };
   }, [step, repo, files, branch, createBranch]);
+
+  useEffect(() => {
+    if (step === "review" && openPr && createBranch && !summaryText && !summaryLoading) {
+      genSummary();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, openPr, createBranch]);
 
   const connect = async () => {
     if (!tokenInput.trim()) return;
@@ -301,6 +331,7 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
         open_pr: openPr && createBranch,
         message: message.trim(),
         pr_title: message.trim(),
+        pr_body: openPr && createBranch && summaryText.trim() ? summaryText.trim() : undefined,
         files: files.map((f) => ({ path: f.path.trim(), content: f.content })),
       });
       setResult(r.data);
@@ -317,6 +348,8 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
     setFiles([]);
     setMessage("");
     setResult(null);
+    setSummaryText("");
+    setSummaryStats(null);
     setStep("compose");
   };
 
@@ -682,6 +715,46 @@ export default function GithubPush({ open, onClose, lastAssistantMessage, initia
                   );
                 })}
               </div>
+
+              {openPr && createBranch && (
+                <div data-testid="github-change-summary" className="rounded-xl bg-[#161619] border border-orange-500/20 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Sparkles size={14} className="text-orange-400 shrink-0" />
+                      <span className="text-sm text-zinc-200">Change summary</span>
+                      <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">PR description</span>
+                      {summaryStats && (
+                        <span className="text-[11px] font-mono text-zinc-500 ml-1 truncate">
+                          {summaryStats.changed}/{summaryStats.total} changed
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      data-testid="github-regen-summary"
+                      onClick={genSummary}
+                      disabled={summaryLoading}
+                      className="text-[11px] flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 text-zinc-300 border border-white/10 hover:bg-white/10 disabled:opacity-40 transition-colors"
+                    >
+                      {summaryLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                      Regenerate
+                    </button>
+                  </div>
+                  {summaryLoading && !summaryText ? (
+                    <div className="flex items-center gap-2 justify-center py-6 text-zinc-600 text-sm">
+                      <Loader2 size={16} className="animate-spin" /> Promethius is writing the summary…
+                    </div>
+                  ) : (
+                    <textarea
+                      data-testid="github-summary-text"
+                      value={summaryText}
+                      onChange={(e) => setSummaryText(e.target.value)}
+                      rows={6}
+                      placeholder="A plain-English description of what changed will appear here…"
+                      className="w-full bg-transparent text-xs text-zinc-300 placeholder:text-zinc-700 focus:outline-none resize-y px-4 py-3"
+                    />
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-between pt-2">
                 <button

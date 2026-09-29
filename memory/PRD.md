@@ -68,6 +68,21 @@ User asked to pull the repo into a fresh workspace and repair it.
 - NOT yet tested live: the actual commit/push and the connected-state UI — these require the
   user's GitHub Personal Access Token (repo scope), which the user will paste into the in-app
   GitHub panel later. Backend read endpoints + chat recognition verified via curl.
+
+## Change summary for PRs (2026-06 — E1)
+- Every self-update PR now carries a plain-English "what changed" description generated from the
+  ACTUAL diff (not just a file list). Unchanged/binary files are skipped.
+- Backend (server.py): _fetch_old_content, _collect_changes (diff vs base branch), _compact_diff
+  (difflib, capped), _summarize_changes (LLM gpt-4o-mini via Universal Key → markdown summary,
+  grouped by area). Used automatically for the PR body in /github/commit when open_pr and no
+  pr_body supplied. New preview endpoint POST /api/github/change-summary returns
+  {summary, changed[], changed_count, total, unchanged_count}.
+- Frontend (GithubPush.jsx): editable "Change summary" panel in the review step (shown when
+  open_pr + new branch). Auto-generates on entering review, has a Regenerate button, shows
+  "changed/total", and the edited text is sent as the PR body on push.
+- Verified: _summarize_changes produces a clear, diff-aware plain-English description via curl/script.
+  Live PR body still exercised only once the user connects a GitHub token (change-summary endpoint
+  needs it to read old content from GitHub).
 - P1: Push repaired baseline back to existing GitHub repo (no delete needed).
 - P2: Review the self-modification/GitHub feature that caused the break to add guardrails.
 
