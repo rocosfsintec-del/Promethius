@@ -86,8 +86,11 @@ const rateLabel = (p, m) => {
   return pr ? `$${pr[0]}/M in · $${pr[1]}/M out` : "Pricing unavailable";
 };
 
+// Live provider reachability: online (green) if not explicitly reported offline.
+const isOnline = (status, p) => (status || {})[p] !== false;
+
 export default function ChatPanel({
-  conversationId, setConversationId, providers, provider, model,
+  conversationId, setConversationId, providers, modelStatus, provider, model,
   onModelChange, refreshConversations,
 }) {
   const [messages, setMessages] = useState([]);
@@ -256,24 +259,35 @@ export default function ChatPanel({
             <span className={`font-mono text-[11px] ${COST_STYLES[costOf(provider, model)].text}`} title={rateLabel(provider, model)}>
               {fmtCost(estMsgCost(provider, model))}
             </span>
+            <span
+              data-testid="model-status-current"
+              className={`w-1.5 h-1.5 rounded-full ${isOnline(modelStatus, provider) ? "bg-green-500" : "bg-red-500"}`}
+              title={isOnline(modelStatus, provider) ? "Online · reachable" : "Offline · unreachable"}
+            />
           </button>
           {modelOpen && (
             <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-64 backdrop-blur-xl py-1">
               {flat.map(({ p, m }) => {
                 const cost = costOf(p, m);
                 const cs = COST_STYLES[cost];
+                const online = isOnline(modelStatus, p);
                 return (
                   <button
                     key={p + m}
                     data-testid={`model-option-${m}`}
                     data-cost={cost}
-                    title={rateLabel(p, m)}
+                    data-online={online}
+                    disabled={!online}
+                    title={online ? rateLabel(p, m) : "Offline — provider unreachable"}
                     onClick={() => {
+                      if (!online) return;
                       onModelChange(p, m);
                       setModelOpen(false);
                     }}
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/5 transition-colors flex items-center justify-between gap-2 ${
-                      m === model ? "bg-white/5" : ""
+                    className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between gap-2 ${
+                      !online
+                        ? "opacity-40 cursor-not-allowed"
+                        : `hover:bg-white/5 ${m === model ? "bg-white/5" : ""}`
                     }`}
                   >
                     <span className="flex items-center gap-2.5 min-w-0">
@@ -282,8 +296,15 @@ export default function ChatPanel({
                         {MODEL_LABELS[m] || m}
                       </span>
                     </span>
-                    <span data-testid={`model-price-${m}`} className={`font-mono text-[10px] shrink-0 ${cs.text}`}>
-                      {fmtCost(estMsgCost(p, m))}
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span data-testid={`model-price-${m}`} className={`font-mono text-[10px] ${cs.text}`}>
+                        {fmtCost(estMsgCost(p, m))}
+                      </span>
+                      <span
+                        data-testid={`model-status-${m}`}
+                        className={`w-1.5 h-1.5 rounded-full ${online ? "bg-green-500" : "bg-red-500"}`}
+                        title={online ? "Online · reachable" : "Offline · unreachable"}
+                      />
                     </span>
                   </button>
                 );
@@ -298,6 +319,14 @@ export default function ChatPanel({
                   ))}
                 </span>
                 <span className="text-zinc-600">est. / msg</span>
+              </div>
+              <div className="flex items-center gap-3 px-4 pb-2 text-[10px] text-zinc-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Online
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Offline
+                </span>
               </div>
             </div>
           )}

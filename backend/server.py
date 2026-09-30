@@ -1194,6 +1194,28 @@ async def models(user=Depends(get_current_user)):
     return result
 
 
+@api_router.get("/models/status")
+async def models_status(user=Depends(get_current_user)):
+    """Live reachability per provider. Checked by the UI on launch to mark
+    each model online (green) or offline (red)."""
+    has_universal = bool(EMERGENT_LLM_KEY)
+    status = {
+        "openai": bool((globals().get("OPENAI_API_KEY") or "")) or has_universal,
+        "anthropic": bool((globals().get("ANTHROPIC_API_KEY") or "")) or has_universal,
+        "ollama": False,
+    }
+    try:
+        tags_url = OLLAMA_BASE_URL.rstrip("/")
+        if tags_url.endswith("/v1"):
+            tags_url = tags_url[:-3]
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(tags_url.rstrip("/") + "/api/tags")
+        status["ollama"] = r.status_code == 200
+    except Exception as e:
+        logger.info(f"ollama status unavailable: {e}")
+    return status
+
+
 @api_router.post("/chat")
 async def chat(req: ChatReq, user=Depends(get_current_user)):
     uid = user["id"]

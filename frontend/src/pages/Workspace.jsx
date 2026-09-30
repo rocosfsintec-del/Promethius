@@ -10,6 +10,7 @@ export default function Workspace() {
   const [conversations, setConversations] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [providers, setProviders] = useState({});
+  const [modelStatus, setModelStatus] = useState({});
   const [provider, setProvider] = useState("openai");
   const [model, setModel] = useState("gpt-4o-mini");
   const [activeTool, setActiveTool] = useState(null);
@@ -21,6 +22,7 @@ export default function Workspace() {
   useEffect(() => {
     refreshConversations();
     api.get("/models").then((r) => setProviders(r.data));
+    api.get("/models/status").then((r) => setModelStatus(r.data)).catch(() => {});
     api.get("/auth/me").then((r) => {
       if (r.data.provider) setProvider(r.data.provider);
       if (r.data.model) setModel(r.data.model);
@@ -65,6 +67,7 @@ export default function Workspace() {
           conversationId={currentId}
           setConversationId={setCurrentId}
           providers={providers}
+          modelStatus={modelStatus}
           provider={provider}
           model={model}
           onModelChange={(p, m) => {

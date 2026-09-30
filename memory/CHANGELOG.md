@@ -55,3 +55,11 @@
 - P1: split server.py + Orb.jsx into modules.
 - P2: PWA manifest + service worker (installable/offline).
 - P2: same silent-catch anti-pattern remains in enroll()/forget() — surface errors there too.
+
+## Live model status indicator (2026-06 — E1)
+- Model dropdown (ChatPanel.jsx) now shows a per-provider reachability marker: green dot = online/reachable, red dot = offline/unreachable (distinct from the left-side green/yellow/red COST dots). Shown on each dropdown row (right of price), on the header model button, and explained in the dropdown legend (Online/Offline).
+- Offline models are disabled (opacity-40, cursor-not-allowed, not selectable).
+- Backend: new GET /api/models/status returns {openai, anthropic, ollama} booleans. openai/anthropic online if native key OR Emergent Universal Key present; ollama online only if the local tags endpoint responds. Verified endpoint registered (401 without auth).
+- Status is fetched ONCE on launch in Workspace.jsx (api.get("/models/status")) per user's request (no polling).
+- testids: model-status-current (header), model-status-<model> (each row).
+- NOT headless-verified visually: dropdown sits behind WebAuthn passkey auth. Backend endpoint + frontend compile verified.
