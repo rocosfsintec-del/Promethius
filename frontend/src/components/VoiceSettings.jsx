@@ -420,9 +420,6 @@ function ApiKeysTab() {
           </span>
         </div>
       )}
-      {!isAdmin && (
-        <p className="text-xs text-amber-400/80">Only the owner (admin) can change API keys. These are shown read-only.</p>
-      )}
       <GithubKeyCard />
       {KEY_FIELDS.map((f) => {
         const set = status[f.id]?.set;
