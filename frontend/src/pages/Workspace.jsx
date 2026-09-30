@@ -19,6 +19,10 @@ export default function Workspace() {
     api.get("/conversations").then((r) => setConversations(r.data));
   }, []);
 
+  const refreshModelStatus = useCallback(() => {
+    return api.get("/models/status").then((r) => setModelStatus(r.data)).catch(() => {});
+  }, []);
+
   useEffect(() => {
     refreshConversations();
     api.get("/models").then((r) => setProviders(r.data));
@@ -68,6 +72,7 @@ export default function Workspace() {
           setConversationId={setCurrentId}
           providers={providers}
           modelStatus={modelStatus}
+          refreshModelStatus={refreshModelStatus}
           provider={provider}
           model={model}
           onModelChange={(p, m) => {

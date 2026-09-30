@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Send, Mic, Square, Paperclip, Globe, Image as ImageIcon, Loader2,
-  Flame, X, FileText, Github,
+  Flame, X, FileText, Github, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -78,7 +78,7 @@ const liveMsgCost = (p, m, inText, outText) => {
 };
 
 const fmtCost = (c) =>
-  c === 0 ? "Free" : c == null ? "" : `~$${c < 0.001 ? c.toFixed(5) : c < 0.01 ? c.toFixed(4) : c.toFixed(3)}`;
+  c === 0 ? "Free" : c == null ? "" : c < 0.0001 ? "<$0.0001" : `~$${c < 0.001 ? c.toFixed(5) : c < 0.01 ? c.toFixed(4) : c.toFixed(3)}`;
 
 const rateLabel = (p, m) => {
   if (p === "ollama" || costOf(p, m) === "free") return "Runs locally · no API cost";
@@ -90,7 +90,7 @@ const rateLabel = (p, m) => {
 const isOnline = (status, p) => (status || {})[p] !== false;
 
 export default function ChatPanel({
-  conversationId, setConversationId, providers, modelStatus, provider, model,
+  conversationId, setConversationId, providers, modelStatus, refreshModelStatus, provider, model,
   onModelChange, refreshConversations,
 }) {
   const [messages, setMessages] = useState([]);
@@ -101,6 +101,7 @@ export default function ChatPanel({
   const [attachments, setAttachments] = useState([]);
   const [recording, setRecording] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [showPush, setShowPush] = useState(false);
   const [pushProposal, setPushProposal] = useState(null);
   const scrollRef = useRef(null);
@@ -329,13 +330,29 @@ export default function ChatPanel({
                 </span>
                 <span className="text-zinc-600">est. / msg</span>
               </div>
-              <div className="flex items-center gap-3 px-4 pb-2 text-[10px] text-zinc-500">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Online
+              <div className="flex items-center justify-between px-4 pb-2 text-[10px] text-zinc-500">
+                <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Online
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Offline
+                  </span>
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Offline
-                </span>
+                <button
+                  data-testid="refresh-model-status"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!refreshModelStatus || statusRefreshing) return;
+                    setStatusRefreshing(true);
+                    try { await refreshModelStatus(); } finally { setStatusRefreshing(false); }
+                  }}
+                  disabled={statusRefreshing}
+                  className="flex items-center gap-1 text-zinc-400 hover:text-orange-400 transition-colors disabled:opacity-50"
+                  title="Refresh online/offline status"
+                >
+                  <RefreshCw size={11} className={statusRefreshing ? "animate-spin" : ""} /> Refresh
+                </button>
               </div>
             </div>
           )}

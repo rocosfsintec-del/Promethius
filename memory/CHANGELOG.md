@@ -63,3 +63,10 @@
 - Status is fetched ONCE on launch in Workspace.jsx (api.get("/models/status")) per user's request (no polling).
 - testids: model-status-current (header), model-status-<model> (each row).
 - NOT headless-verified visually: dropdown sits behind WebAuthn passkey auth. Backend endpoint + frontend compile verified.
+
+## Key Validation UI + Session Total Cost (2026-06 — E1)
+- **Key Validation UI** (VoiceSettings.jsx ApiKeysTab): each SAVED key now shows a live verification badge — green "verified" (CheckCircle2) when the key validates against its provider, red "invalid/failed" (XCircle) when not, "saved" for non-verifiable providers (fal.ai). Added a "Re-verify" button (reverify-keys-button). Runs on tab load and after save/clear. testids: apikey-verify-<id>.
+- Backend: GET /api/settings/keys/verify live-validates saved keys concurrently (asyncio.gather, 8s timeout): openai GET /v1/models, anthropic GET /v1/models, elevenlabs GET /v1/user, resend GET /domains, tavily GET /usage. 200=valid; 400/401/403=invalid; fal has no free check → {verifiable:false}. Verified via curl (stale elevenlabs/tavily keys correctly flagged invalid).
+- **Session Total Cost** (ChatPanel.jsx): chat header now shows a running "Session ~$0.00xx" (or "Session Free" for local/ollama) chip once the conversation has ≥1 message, summing estimated cost across all assistant messages at current model rates. testid: session-cost.
+- Polish: fmtCost now renders sub-$0.0001 totals as "<$0.0001" instead of "$0.00000".
+- Verified: testing agent iteration_25 — 100% frontend pass, all flows (passkey login via CDP virtual authenticator, dropdown status markers, verify badges, session cost chip), zero console errors.

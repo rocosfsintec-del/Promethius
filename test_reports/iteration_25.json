@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only verification of two new features (Key Validation UI + Session Total Cost) + regression on model dropdown status markers, on prom-metrics origin using CDP virtual authenticator for WebAuthn passkey registration. ALL TARGETS PASS. (1) Passkey register via auth-toggle-mode/auth-name-input/auth-email-input/auth-submit-button reaches authenticated Orb page, then /chat via orb-open-chat-button. (2) Model dropdown (model-selector-trigger) renders 11 rows with data-testid=model-status-<model>: gpt-4o-mini, gpt-4o, gpt-5.5, claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5 all data-online='true' & enabled; llama2-uncensored, llama3.1, mistral, qwen2.5 all data-online='false' AND disabled=true with opacity-40 cursor-not-allowed — offline models correctly unselectable. (3) session-cost chip: hidden with 0 messages (correct), and after sending 'Say hi in exactly 3 words.' the assistant replied ('Hello, how are you?') and the chip appeared in header with testid session-cost and text 'Session ~$0.00000' (default gpt-4o-mini). Switching to gpt-4o kept the chip visible with format 'Session ~$0.00000'. Chip format & testid correct. (4) Settings→API tab (settings-link → settings-tab-api): all 6 providers render apikey-status-<id> badges — openai/anthropic/fal/resend='not set' (no verify badge, expected); elevenlabs status='sk_…3456' + apikey-verify-elevenlabs='invalid' (RED, expected — stale stored key); tavily status='tvl…k123' + apikey-verify-tavily='invalid' (RED, expected). reverify-keys-button present and functional — clicking it re-ran verification and badges re-populated with same 'invalid' result. Zero JS console errors captured through the entire flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ChatPanel header session-cost", "issues": ["Cost display for very short single-turn conversations at gpt-4o-mini rate rounds to 'Session ~$0.00000' (5-decimal format). Technically correct (~10 tokens × $0.60/1M ≈ $6e-6 rounds to 0.00000), but visually reads like $0. Consider bumping fmtCost precision to 6 decimals or switching to scientific/micro-dollar notation for sub-cent totals so users see a non-zero estimate (matches the '~$0.00045 est./msg' shown in the dropdown row). Minor polish only."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ChatPanel.jsx session-cost chip correctly guarded on messages.length>0 and uses provider-aware color via COST_STYLES[costOf(provider,model)].text and sessionFree branch — good.",
+    "Model dropdown rows correctly wire data-online + disabled state + opacity-40 cursor-not-allowed for offline providers; keeps SR/keyboard-a11y consistent.",
+    "VoiceSettings.jsx ApiKeysTab renders apikey-status-<id> for every provider and apikey-verify-<id> only for SAVED keys, with 3-state badges (verified / saved / invalid) plus a spinner variant during in-flight re-verify — matches spec.",
+    "fmtCost precision: 5 decimals is too coarse for sub-cent totals at cheap models; recommend `Math.max(4, ...)` dynamic precision or format < $0.0001 as `< $0.0001` / `~µ$` to avoid displaying '$0.00000' for real usage."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only run)", "frontend": "100%"},
+  "test_credentials": "Fresh passkey user via CDP virtual authenticator on prom-metrics origin (tester_<uuid>@example.com). Stored stale keys on backend for elevenlabs + tavily correctly surface 'invalid' — proves live verification works.",
+  "seed_data_creation": "One transient passkey user per test run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "App navigation: after passkey auth, land on Orb page (/); top-right controls include data-testid=orb-open-chat-button (→ /chat) and data-testid=orb-settings-button (Settings modal). On /chat, header shows model-selector-trigger + session-cost (only when messages.length>0). Settings modal is also reachable from /chat via data-testid=settings-link. API tab testid is settings-tab-api. Provider IDs: openai, anthropic, elevenlabs, fal, tavily, resend. Model IDs in dropdown: gpt-4o-mini, gpt-4o, gpt-5.5, claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5, llama2-uncensored, llama3.1, mistral, qwen2.5 (last 4 offline unless ollama up).",
+  "rca of the issue": "No functional bugs. Only minor UX polish suggested for fmtCost precision when totals are <$0.0001."
+}
