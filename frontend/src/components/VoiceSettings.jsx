@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette, KeyRound, Sparkles, Github, ExternalLink } from "lucide-react";
+import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fingerprint, Plus, Pencil, Palette, KeyRound, Sparkles, Github, ExternalLink, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -380,9 +380,19 @@ function ApiKeysTab() {
   const [status, setStatus] = useState(null);
   const [vals, setVals] = useState({});
   const [saving, setSaving] = useState(false);
+  const [verify, setVerify] = useState({});
+  const [verifying, setVerifying] = useState(false);
+
+  const runVerify = () => {
+    setVerifying(true);
+    return api.get("/settings/keys/verify")
+      .then((r) => setVerify(r.data))
+      .catch(() => {})
+      .finally(() => setVerifying(false));
+  };
 
   const load = () => api.get("/settings/keys").then((r) => setStatus(r.data)).catch(() => {});
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().then(runVerify); }, []);
 
   const save = async () => {
     const payload = {};
@@ -392,6 +402,7 @@ function ApiKeysTab() {
     try {
       const r = await api.put("/settings/keys", payload);
       setStatus(r.data); setVals({}); toast.success("API keys saved");
+      runVerify();
     } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
     finally { setSaving(false); }
   };
@@ -401,6 +412,7 @@ function ApiKeysTab() {
     try {
       const r = await api.put("/settings/keys", { [id]: "" });
       setStatus(r.data); setVals((v) => ({ ...v, [id]: "" })); toast.success("Key removed");
+      runVerify();
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
     finally { setSaving(false); }
   };
@@ -421,8 +433,21 @@ function ApiKeysTab() {
         </div>
       )}
       <GithubKeyCard />
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-zinc-500">Saved keys are checked live against each provider.</span>
+        <button
+          data-testid="reverify-keys-button"
+          onClick={runVerify}
+          disabled={verifying}
+          className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-orange-400 transition-colors disabled:opacity-50"
+          title="Re-verify all saved keys"
+        >
+          <RefreshCw size={12} className={verifying ? "animate-spin" : ""} /> Re-verify
+        </button>
+      </div>
       {KEY_FIELDS.map((f) => {
         const set = status[f.id]?.set;
+        const v = verify[f.id];
         return (
           <div key={f.id} className="rounded-xl border border-white/5 bg-[#16161c] p-3">
             <div className="flex items-center justify-between mb-1.5">
@@ -434,6 +459,21 @@ function ApiKeysTab() {
                   </span>
                 ) : (
                   <span data-testid={`apikey-status-${f.id}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/10">not set</span>
+                )}
+                {set && (
+                  verifying && !v ? (
+                    <Loader2 data-testid={`apikey-verify-${f.id}`} size={13} className="animate-spin text-zinc-500" />
+                  ) : v?.valid === true ? (
+                    <span data-testid={`apikey-verify-${f.id}`} className="flex items-center gap-1 text-[10px] text-emerald-400" title="Verified live with provider">
+                      <CheckCircle2 size={13} /> verified
+                    </span>
+                  ) : v?.verifiable === false ? (
+                    <span data-testid={`apikey-verify-${f.id}`} className="text-[10px] text-zinc-500" title="No live check available for this provider">saved</span>
+                  ) : v && v.valid === false ? (
+                    <span data-testid={`apikey-verify-${f.id}`} className="flex items-center gap-1 text-[10px] text-red-400" title={v.error || "Invalid key"}>
+                      <XCircle size={13} /> {v.error === "invalid key" ? "invalid" : "failed"}
+                    </span>
+                  ) : null
                 )}
               </div>
               {set && (

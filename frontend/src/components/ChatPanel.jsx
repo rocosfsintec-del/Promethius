@@ -242,6 +242,15 @@ export default function ChatPanel({
 
   const flat = Object.entries(providers || {}).flatMap(([p, ms]) => ms.map((m) => ({ p, m })));
 
+  // Running cost estimate for the whole conversation (current model rates).
+  const sessionCost = messages.reduce((sum, m, idx) => {
+    if (m.role !== "assistant" || m.type === "image") return sum;
+    const prev = idx > 0 && messages[idx - 1]?.role === "user" ? messages[idx - 1].content : "";
+    const c = liveMsgCost(provider, model, prev, m.content);
+    return sum + (c || 0);
+  }, 0);
+  const sessionFree = provider === "ollama" || costOf(provider, model) === "free";
+
   return (
     <div className="flex-1 flex flex-col h-full relative">
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
@@ -331,6 +340,18 @@ export default function ChatPanel({
             </div>
           )}
         </div>
+        {messages.length > 0 && (
+          <div
+            data-testid="session-cost"
+            title="Estimated total cost for this conversation at current model rates"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#121214] border border-white/10 text-xs font-mono text-zinc-400"
+          >
+            <span className="text-zinc-500">Session</span>
+            <span className={sessionFree ? "text-emerald-400" : COST_STYLES[costOf(provider, model)].text}>
+              {sessionFree ? "Free" : fmtCost(sessionCost)}
+            </span>
+          </div>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">

@@ -1464,6 +1464,63 @@ async def set_keys(req: KeysReq, user=Depends(get_current_user)):
     return _keys_status()
 
 
+# Fields we can cheaply validate live against the provider. Others (fal) have no
+# free/no-cost check, so we report them as not live-verifiable.
+_VERIFIABLE_KEYS = ("openai", "anthropic", "elevenlabs", "resend", "tavily")
+
+
+async def _verify_key(field: str, value: str) -> dict:
+    """Live-validate one API key against its provider. Returns {valid, error}."""
+    if not value:
+        return {"valid": False, "error": "not set", "verifiable": True}
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            if field == "openai":
+                r = await c.get("https://api.openai.com/v1/models",
+                                headers={"Authorization": f"Bearer {value}"})
+            elif field == "anthropic":
+                r = await c.get("https://api.anthropic.com/v1/models",
+                                headers={"x-api-key": value, "anthropic-version": "2023-06-01"})
+            elif field == "elevenlabs":
+                r = await c.get("https://api.elevenlabs.io/v1/user",
+                                headers={"xi-api-key": value})
+            elif field == "resend":
+                r = await c.get("https://api.resend.com/domains",
+                                headers={"Authorization": f"Bearer {value}"})
+            elif field == "tavily":
+                r = await c.get("https://api.tavily.com/usage",
+                                headers={"Authorization": f"Bearer {value}"})
+            else:
+                return {"valid": None, "verifiable": False}
+        if r.status_code == 200:
+            return {"valid": True, "verifiable": True}
+        if r.status_code in (400, 401, 403):
+            return {"valid": False, "error": "invalid key", "verifiable": True}
+        return {"valid": False, "error": f"provider returned {r.status_code}", "verifiable": True}
+    except Exception as e:
+        return {"valid": False, "error": f"unreachable: {str(e)[:80]}", "verifiable": True}
+
+
+@api_router.get("/settings/keys/verify")
+async def verify_keys(user=Depends(get_current_user)):
+    """Live-verify every saved key against its provider. Green check in the UI = valid."""
+    out = {}
+    tasks = {}
+    for f in SECRET_FIELDS:
+        val = globals().get(_SECRET_TO_GLOBAL.get(f, "")) or ""
+        if not val:
+            out[f] = {"valid": False, "error": "not set", "verifiable": f in _VERIFIABLE_KEYS}
+        elif f not in _VERIFIABLE_KEYS:
+            out[f] = {"valid": None, "verifiable": False}
+        else:
+            tasks[f] = _verify_key(f, val)
+    if tasks:
+        results = await asyncio.gather(*tasks.values())
+        for f, res in zip(tasks.keys(), results):
+            out[f] = res
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Speaker recognition (voiceprints) + per-person profiles
 # ---------------------------------------------------------------------------
