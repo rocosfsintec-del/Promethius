@@ -355,13 +355,13 @@ function GithubKeyCard() {
       </p>
       {!status ? (
         <div className="flex justify-center py-2"><Loader2 size={14} className="animate-spin text-orange-500" /></div>
-      ) : status.connected ? null : (
+      ) : (
         <div className="flex gap-2">
           <input
             data-testid="settings-github-token-input"
             type="password"
             autoComplete="off"
-            placeholder="ghp_… or github_pat_…"
+            placeholder={status.connected ? "Paste a new token to replace" : "ghp_… or github_pat_…"}
             value={token}
             onChange={(e) => setToken(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && connect()}
@@ -369,7 +369,7 @@ function GithubKeyCard() {
           />
           <button data-testid="settings-github-connect" onClick={connect} disabled={busy || !token.trim()}
             className="px-3.5 rounded-lg bg-zinc-100 text-black text-sm font-medium hover:bg-white disabled:opacity-40 flex items-center gap-1.5">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Github size={14} />} Connect
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Github size={14} />} {status.connected ? "Update" : "Connect"}
           </button>
         </div>
       )}

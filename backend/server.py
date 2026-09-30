@@ -2123,8 +2123,8 @@ async def gh_set_token(req: GithubTokenReq, user=Depends(get_current_user)):
 
 @api_router.get("/github/status")
 async def gh_status(user=Depends(get_current_user)):
-    doc = await db.github_config.find_one({"user_id": user["id"]}, {"_id": 0, "token_enc": 0})
-    if not doc:
+    doc = await db.github_config.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not doc or not doc.get("token_enc"):
         return {"connected": False}
     return {"connected": True, "login": doc.get("login")}
 
