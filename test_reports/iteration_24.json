@@ -1,0 +1,24 @@
+{
+  "summary": "Prime-Directive regression sweep passed on all 6 targets. Backend (pytest, 6/6 pass): chat via Emergent Universal Key returns non-empty replies for both openai/gpt-4o-mini and anthropic/claude-sonnet-4-6; GET /api/settings/keys returns universal_key.set=true and chat_ready=true; a freshly registered NON-ADMIN user can PUT /api/settings/keys {tavily:'tvly-...'} and gets 200 with tavily.set=true + masked value (NO 403), GET confirms persistence, PUT '' clears it; GET /api/github/status returns connected:false after PUT /api/github/self-config with a repo but no token; GET /api/github/self-bundle returns file_count>0 with NO paths under storage/, memory/, or any .env leaked. Frontend (Playwright + CDP virtual authenticator on prom-metrics origin, aligned WEBAUTHN_RP_ID): passkey register succeeds, Orb page loads with visible orb-canvas, opening Settings\u2192API tab renders apikeys-tab (no black screen), github-token-card + settings-github-token-input visible & enabled, all six apikey-input-{openai,anthropic,elevenlabs,fal,tavily,resend} visible and enabled (not disabled), save-apikeys-button present. Zero console errors observed on the flow. isAdmin ReferenceError crash and admin-gate regressions both confirmed gone.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_regression.py",
+    "/app/test_reports/pytest/iter24.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py set_keys is now Depends(get_current_user) not require_admin \u2014 confirmed non-admin returns 200 and persists.",
+    "gh_status correctly gates connected on token_enc presence; self_repo-only doc does not falsely mark connected.",
+    "gh_self_bundle skip logic correctly excludes storage/, memory/, and .env from returned files (spot-checked list).",
+    "VoiceSettings ApiKeysTab no longer references isAdmin; GithubKeyCard always renders the input; six provider fields are enabled without any admin condition.",
+    "Note: the six provider IDs are {openai, anthropic, elevenlabs, fal, tavily, resend}. The request mentioned 'six apikey-input-* fields' \u2014 all six exist and are enabled."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter24_regression.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin: owner@example.com / Prometheus#2026 (used for chat + github tests). Non-admin: freshly registered via POST /api/auth/register (email regr_<uuid>@example.com / Regression#2026) for the key-save regression. Frontend passkey users registered via CDP virtual authenticator on prom-metrics origin.",
+  "seed_data_creation": "Transient only: one non-admin user per pytest run (regr_<uuid>@example.com), transient tavily key set then cleared, transient github_config self_repo doc for status test (token never set).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "WEBAUTHN_RP_ID/EXPECTED_ORIGIN now correctly align to prom-metrics.preview.emergentagent.com so CDP virtual-authenticator passkey registration works directly from the served origin \u2014 no more JWT-injection workaround needed. Settings modal opens via data-testid=settings-link on the orb page; API tab is data-testid=settings-tab-api; provider IDs are openai/anthropic/elevenlabs/fal/tavily/resend."
+}
