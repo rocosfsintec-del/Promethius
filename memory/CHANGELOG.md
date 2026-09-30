@@ -1,5 +1,21 @@
 # Promethius — Changelog
 
+## 2026-06 (fork — chat online, key manager, GitHub self-update, orb = LLMOrb)
+- **Chat works with zero setup**: `openai_client()` routes through the Emergent Universal Key (OpenAI-compatible proxy) when no native key is set — serves OpenAI *and* Anthropic model names. Native OpenAI key (pasted/env) preferred; Ollama stays local. Anthropic-native path only when ANTHROPIC_API_KEY present.
+- **In-app API key manager** (Settings → API): paste OpenAI/Anthropic/ElevenLabs/fal/Tavily/Resend keys. Stored encrypted (Fernet) in `db.app_config` doc `secrets`, applied to live globals on save + on startup (`load_stored_keys`). GET/PUT `/api/settings/keys`. **Not admin-gated** (personal app) — any signed-in user can manage keys.
+- **GitHub token card** in the API tab (`/api/github/token` connect/status/disconnect). `GET /api/github/status` reports connected only when a token is stored (self-repo-only docs → false). Disconnect keeps self_repo. Paste box always visible (paste-to-replace).
+- **GitHub self-update**: default self-repo `rocosfsintec-del/Promethius`; `GET /api/github/self-config|self-bundle` (whole live source in one call, excludes storage/memory/.env/caches). GithubPush "Sync all" → stages a `promethius-sync` branch + PR. Chat knows its own repo.
+- **Change summary for PRs**: diff-aware plain-English PR body (`_collect_changes`/`_summarize_changes`), preview via `POST /api/github/change-summary`, editable panel in the push review step.
+- **Cost-aware model dropdown**: colour tiers (green free / yellow moderate / red premium), estimated $/msg per model, live per-message cost chip.
+- **Orb = user's LLMOrb** (`pages/Orb.jsx useOrbCanvas`): energy sphere + pulsing core + rim + curved flame tongues, hue from colour picker; live activity maps to idle/thinking/speaking params; size/density/chaos/floatSpeed/glow honoured; standby dims; green flash.
+- **WebAuthn origin** realigned to current preview host `prom-metrics.preview.emergentagent.com`.
+
+### Verified (this fork)
+- Chat E2E via Universal Key (gpt-4o-mini, claude-sonnet-4-6, tool loop) — curl + testing agent.
+- API keys: non-admin save/persist/clear — curl. GitHub status logic (self-repo-only → not connected) — curl.
+- Orb LLMOrb render — visual parity with source.
+- Frontend compiles clean (only exhaustive-deps warnings).
+
 ## 2026-06-30 (fork 2 — desktop app: PWA install, run-on-boot, fullscreen launcher)
 - **Backend serves the built UI** on port 8001 when `frontend/build` exists (guarded; cloud/dev preview unaffected). Single-process production mode.
 - **PWA / Install Desktop App**: `manifest.json` (standalone, fullscreen override), `service-worker.js` (network-first, skips /api, offline shell), flame favicon + 192/512 icons, `src/pwa.js` registers SW + captures beforeinstallprompt. **"Install Desktop App" button** in the Settings modal footer (`install-app-button` / `install-app-status`).
