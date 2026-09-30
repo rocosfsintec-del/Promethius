@@ -100,3 +100,7 @@ User asked to pull the repo into a fresh workspace and repair it.
   Files can come from the last chat reply, Promethius's own source, or blank/manual.
 - Verified: backend curl (real commit created+deleted) and full UI (testing agent, 6/6).
 - Note: uses user-supplied GitHub PAT (repo scope). No new .env var required.
+
+## Orb replaced with user's LLMOrb (2026-06)
+- Ported the user's exact LLMOrb canvas (energy sphere + bright pulsing core + rim + 26 curved flame tongues, hue-based) into pages/Orb.jsx useOrbCanvas.
+- Driven by live energy/voice: activity maps to their idle/thinking/speaking params (pulse/swirl/brightness/flicker). Color picker -> hue (hexToHue), size -> radius, density -> flame count, chaos -> flicker, floatSpeed -> bob, lightning -> brightness; standby dims, green flash -> hue 140. tipColor now unused by this orb (kept in settings, harmless).

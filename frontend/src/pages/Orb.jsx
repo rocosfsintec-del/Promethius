@@ -8,7 +8,7 @@ import VoiceSettings from "../components/VoiceSettings";
 import { createRollingRecorder } from "../lib/audio";
 import { DEFAULT_ORB, hexToRgb } from "../lib/orbConfig";
 
-// ---- Plasma orb canvas ----------------------------------------------------
+// ---- Personal LLM plasma orb (ported from user's LLMOrb) -------------------
 function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, standbyRef) {
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -18,31 +18,30 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
     let t = 0;
     let smooth = 0;
     let voiceSmooth = 0;
-    let flare = 0;        // fast-attack / slow-release envelope for syllable flares
-    let embers = [];      // faint rising ember particles that drift off the flames
-    let pool = 0;         // eased firelight glow that gathers beneath the orb
+    let flare = 0;
 
-    // Precompute an even distribution of points on a unit sphere (Fibonacci),
-    // then the fixed set of short edges between them. Because the sphere spins
-    // as a rigid body, pairwise distances never change → edges computed once.
-    const NP = 78;
-    const pts = [];
-    const golden = Math.PI * (3 - Math.sqrt(5));
-    for (let i = 0; i < NP; i++) {
-      const y = 1 - (i / (NP - 1)) * 2;
-      const rad = Math.sqrt(Math.max(0, 1 - y * y));
-      const th = i * golden;
-      pts.push({ x: Math.cos(th) * rad, y, z: Math.sin(th) * rad, ph: Math.random() * Math.PI * 2 });
-    }
-    const edges = [];
-    const TH = 0.46;
-    for (let i = 0; i < NP; i++) {
-      for (let j = i + 1; j < NP; j++) {
-        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y, dz = pts[i].z - pts[j].z;
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (d < TH) edges.push({ a: i, b: j, d });
+    const MAXF = 60;
+    const flames = Array.from({ length: MAXF }, () => ({
+      len: 0.72 + Math.random() * 0.18,
+      speed: 0.8 + Math.random() * 1.4,
+      phase: Math.random() * Math.PI * 2,
+      width: 8 + Math.random() * 10,
+    }));
+
+    const hexToHue = (hex) => {
+      const { r, g, b } = hexToRgb(hex);
+      const rn = r / 255, gn = g / 255, bn = b / 255;
+      const mx = Math.max(rn, gn, bn), mn = Math.min(rn, gn, bn), d = mx - mn;
+      let hh = 0;
+      if (d) {
+        if (mx === rn) hh = ((gn - bn) / d) % 6;
+        else if (mx === gn) hh = (bn - rn) / d + 2;
+        else hh = (rn - gn) / d + 4;
+        hh *= 60;
+        if (hh < 0) hh += 360;
       }
-    }
+      return hh;
+    };
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -55,225 +54,107 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
 
     const render = () => {
       const cfg = configRef.current || DEFAULT_ORB;
-      let { r, g, b } = hexToRgb(cfg.color);
-      const tipC = hexToRgb(cfg.tipColor || cfg.color);
-      let tr = tipC.r, tg = tipC.g, tb = tipC.b;
-      if (flashRef && flashRef.current > Date.now()) { r = 34; g = 211; b = 120; tr = 34; tg = 211; tb = 120; }
       t += 0.016;
-      const target = energyRef.current;
-      smooth += (target - smooth) * 0.08;
+      smooth += (energyRef.current - smooth) * 0.08;
       voiceSmooth += ((voiceRef ? voiceRef.current : 0) - voiceSmooth) * 0.4;
       const vNow = voiceRef ? voiceRef.current : 0;
       flare += (vNow - flare) * (vNow > flare ? 0.6 : 0.12);
-      const eff = Math.min(smooth + voiceSmooth * 1.7, 1.2);
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      const cx = w / 2;
+
       const sb = standbyRef && standbyRef.current;
+      const w = canvas.clientWidth, h = canvas.clientHeight, cx = w / 2;
       const cy = h / 2 + Math.sin(t * (sb ? 0.12 : 0.6)) * 16 * (cfg.floatSpeed * 2) * (sb ? 0.6 : 1);
 
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = "#000005";
       ctx.fillRect(0, 0, w, h);
 
-      const base = Math.min(w, h) * cfg.size;
-      const glow = 0.55 + (cfg.lightning ?? 0.9) * 0.6;
-      let bright = Math.min((eff + voiceSmooth * 0.5) * glow, 1.5);
-      if (sb) bright = Math.min(bright, 0.12);
-      const chaos = cfg.chaos ?? 1;
-      const danceSpeed = 0.6 + (cfg.floatSpeed ?? 0.5) * 1.3;
-      const R = base * (1 + 0.03 * Math.sin(t * 1.6) + bright * 0.08);
-      const webBright = 0.22 + bright * 0.55;
-
-      const lerpHex = (t2) => ({ r: r + (tr - r) * t2, g: g + (tg - g) * t2, b: b + (tb - b) * t2 });
-      const drawFlameTongue = (x0, y0, x1, y1, wBase, alpha) => {
-        const steps = 4;
-        for (let s = 0; s < steps; s++) {
-          const tt = s / (steps - 1);
-          const px = x0 + (x1 - x0) * tt;
-          const py = y0 + (y1 - y0) * tt;
-          const rad = wBase * (1 - tt * 0.82) + 0.6;
-          const a = alpha * (1 - tt) * (1 - tt);
-          if (a <= 0.003) continue;
-          const c = lerpHex(tt);
-          const gg = ctx.createRadialGradient(px, py, 0, px, py, rad);
-          gg.addColorStop(0, `rgba(${Math.min(c.r + 90, 255)},${Math.min(c.g + 72, 255)},${Math.min(c.b + 60, 255)},${a})`);
-          gg.addColorStop(0.5, `rgba(${c.r},${c.g},${c.b},${a * 0.5})`);
-          gg.addColorStop(1, `rgba(${c.r},${c.g},${c.b},0)`);
-          ctx.fillStyle = gg;
-          ctx.beginPath();
-          ctx.arc(px, py, rad, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      // Live activity drives the "state" params (idle -> thinking -> speaking).
+      let act = Math.min(smooth + voiceSmooth * 1.6, 1.3);
+      if (sb) act = Math.min(act, 0.12);
+      const flashing = flashRef && flashRef.current > Date.now();
+      const hue = flashing ? 140 : hexToHue(cfg.color);
+      const lightMul = 0.55 + (cfg.lightning ?? 0.9) * 0.6;
+      const p = {
+        pulse: 0.035 + act * 0.12,
+        swirl: 1.1 + act * 2.6,
+        brightness: (1.0 + act * 0.5 + voiceSmooth * 0.6) * lightMul,
+        flicker: (0.8 + act * 1.8 + flare * 2.2) * (cfg.chaos ?? 1),
+        hue,
       };
 
-      // Translucent glass sphere body (gives the orb volume).
-      const body = ctx.createRadialGradient(cx - R * 0.22, cy - R * 0.22, R * 0.05, cx, cy, R);
-      body.addColorStop(0, `rgba(${r},${g},${b},${0.1 + bright * 0.1})`);
-      body.addColorStop(0.6, `rgba(${(r * 0.28) | 0},${(g * 0.32) | 0},${(b * 0.42) | 0},0.2)`);
-      body.addColorStop(1, "rgba(0,0,8,0.02)");
-      ctx.fillStyle = body;
+      const breath = 1 + Math.sin(t * (act < 0.2 ? 1.2 : 3.4)) * p.pulse;
+      const base = Math.min(w, h) * (cfg.size ?? 0.16);
+      const radius = base * breath;
+
+      // outer glow
+      const glow = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 1.55);
+      glow.addColorStop(0, `hsla(${p.hue}, 100%, 70%, ${0.18 * p.brightness})`);
+      glow.addColorStop(0.45, `hsla(${p.hue}, 100%, 50%, 0.12)`);
+      glow.addColorStop(1, `hsla(${p.hue}, 100%, 40%, 0)`);
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius * 1.55, 0, Math.PI * 2);
       ctx.fill();
 
-      // Everything below glows additively.
-      ctx.globalCompositeOperation = "lighter";
-
-      // Outer halo / bloom around the sphere.
-      const halo = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R * 1.75);
-      halo.addColorStop(0, `rgba(${r},${g},${b},${0.05 + bright * 0.14})`);
-      halo.addColorStop(0.5, `rgba(${r},${g},${b},${0.02 + bright * 0.05})`);
-      halo.addColorStop(1, "rgba(0,0,10,0)");
-      ctx.fillStyle = halo;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.75, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Ember glow pool — firelight gathering beneath the orb.
-      const poolTarget = Math.min(bright * 0.55 + flare * 0.5 + embers.length / 140, 1);
-      pool += (poolTarget - pool) * (poolTarget > pool ? 0.05 : 0.02);
-      if (pool > 0.01) {
-        const pw = R * 2.6;
-        ctx.save();
-        ctx.translate(cx, cy + R * 1.55);
-        ctx.scale(1, 0.26);
-        const pg = ctx.createRadialGradient(0, 0, 0, 0, 0, pw);
-        pg.addColorStop(0, `rgba(${Math.min(r + 45, 255)},${Math.min(g + 32, 255)},${Math.min(b + 26, 255)},${0.03 + pool * 0.2})`);
-        pg.addColorStop(0.6, `rgba(${r},${g},${b},${0.015 + pool * 0.08})`);
-        pg.addColorStop(1, "rgba(0,0,10,0)");
-        ctx.fillStyle = pg;
+      // flames around the sphere
+      const nF = Math.max(10, Math.min(MAXF, Math.round(26 * (cfg.density ?? 1))));
+      const flareOut = flare * 0.5;
+      for (let i = 0; i < nF; i++) {
+        const f = flames[i];
+        const fa = (i / nF) * Math.PI * 2;
+        const flicker = 1 + Math.sin(t * f.speed * p.flicker + f.phase) * 0.18;
+        const a = fa + t * 0.15 * p.swirl * 0.15;
+        const inner = radius * 0.92;
+        const outer = radius * f.len * flicker * ((act < 0.2 ? 1.18 : 1.32) + flareOut);
+        const x1 = cx + Math.cos(a) * inner;
+        const y1 = cy + Math.sin(a) * inner;
+        const x2 = cx + Math.cos(a) * outer;
+        const y2 = cy + Math.sin(a) * outer - 10 * flicker;
+        const gg = ctx.createLinearGradient(x1, y1, x2, y2);
+        gg.addColorStop(0, `hsla(${p.hue}, 100%, 80%, 0)`);
+        gg.addColorStop(0.25, `hsla(${p.hue}, 100%, 72%, ${0.55 * p.brightness})`);
+        gg.addColorStop(1, `hsla(${p.hue + 10}, 100%, 85%, 0)`);
+        ctx.strokeStyle = gg;
+        ctx.lineWidth = f.width * (0.55 + 0.45 * flicker);
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.arc(0, 0, pw, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // --- Plasma filament web wrapping the rotating sphere ---
-      const rot = t * (0.15 + (cfg.floatSpeed ?? 0.5) * 0.3);
-      const cosY = Math.cos(rot), sinY = Math.sin(rot);
-      const tilt = 0.5, cosX = Math.cos(tilt), sinX = Math.sin(tilt);
-      const proj = new Array(NP);
-      for (let i = 0; i < NP; i++) {
-        const p = pts[i];
-        const x1 = p.x * cosY + p.z * sinY;
-        const z1 = -p.x * sinY + p.z * cosY;
-        const y2 = p.y * cosX - z1 * sinX;
-        const z2 = p.y * sinX + z1 * cosX;
-        proj[i] = { sx: cx + x1 * R, sy: cy + y2 * R, front: (z2 + 1) / 2 };
-      }
-      for (const e of edges) {
-        const A = proj[e.a], B = proj[e.b];
-        const front = (A.front + B.front) / 2;
-        const flick = 0.55 + 0.45 * Math.sin(t * 2.6 * chaos + pts[e.a].ph);
-        const a = (0.04 + front * front * 0.32 * webBright) * flick * (1 - (e.d / TH) * 0.5);
-        if (a <= 0.012) continue;
-        const lift = 0.35 + front * 0.65;
-        ctx.strokeStyle = `rgba(${Math.min(r + 70 * front, 255) | 0},${Math.min(g + 80 * front, 255) | 0},${Math.min(b + 60 * front, 255) | 0},${a})`;
-        ctx.lineWidth = 0.4 + front * 1.3;
-        ctx.beginPath();
-        ctx.moveTo(A.sx, A.sy);
-        ctx.lineTo(B.sx, B.sy);
+        ctx.moveTo(x1, y1);
+        const midX = (x1 + x2) / 2 + Math.sin(t * 2 + i) * 8;
+        const midY = (y1 + y2) / 2 + Math.cos(t * 1.6 + i) * 6;
+        ctx.quadraticCurveTo(midX, midY, x2, y2);
         ctx.stroke();
-        void lift;
-      }
-      // Bright nodes on the front of the sphere.
-      for (let i = 0; i < NP; i++) {
-        const p = proj[i];
-        if (p.front < 0.35) continue;
-        const tw = 0.6 + 0.4 * Math.sin(t * 4 * chaos + pts[i].ph);
-        const a = (p.front - 0.35) * 0.5 * webBright * tw;
-        const rad = 0.6 + p.front * 1.6;
-        const ng = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rad + 1);
-        ng.addColorStop(0, `rgba(${Math.min(r + 120, 255)},${Math.min(g + 120, 255)},255,${a})`);
-        ng.addColorStop(1, `rgba(${r},${g},${b},0)`);
-        ctx.fillStyle = ng;
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, rad + 1, 0, Math.PI * 2);
-        ctx.fill();
       }
 
-      // --- Bright rim ring around the sphere ---
-      const rimGlow = ctx.createRadialGradient(cx, cy, R * 0.82, cx, cy, R * 1.12);
-      rimGlow.addColorStop(0, "rgba(0,0,10,0)");
-      rimGlow.addColorStop(0.72, `rgba(${r},${g},${b},${0.1 + webBright * 0.25})`);
-      rimGlow.addColorStop(0.9, `rgba(${Math.min(r + 60, 255)},${Math.min(g + 70, 255)},${Math.min(b + 70, 255)},${0.14 + webBright * 0.3})`);
-      rimGlow.addColorStop(1, "rgba(0,0,10,0)");
-      ctx.fillStyle = rimGlow;
+      // glass / energy sphere
+      const sphere = ctx.createRadialGradient(cx - radius * 0.28, cy - radius * 0.32, radius * 0.08, cx, cy, radius);
+      sphere.addColorStop(0, `hsla(${p.hue}, 100%, 92%, 0.95)`);
+      sphere.addColorStop(0.18, `hsla(${p.hue}, 100%, 70%, 0.55)`);
+      sphere.addColorStop(0.45, `hsla(${p.hue}, 100%, 45%, 0.38)`);
+      sphere.addColorStop(0.78, `hsla(${p.hue + 8}, 100%, 28%, 0.55)`);
+      sphere.addColorStop(1, `hsla(${p.hue}, 100%, 60%, 0.85)`);
+      ctx.fillStyle = sphere;
       ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.12, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = `rgba(${Math.min(r + 90, 255)},${Math.min(g + 100, 255)},255,${0.4 + webBright * 0.45})`;
-      ctx.lineWidth = 1.2 + bright * 1.4;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.stroke();
 
-      // --- Ignited core ---
-      const coreR = R * (0.55 + 0.06 * Math.sin(t * 3) + flare * 0.3);
-      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-      core.addColorStop(0, `rgba(255,255,255,${0.55 + bright * 0.35 + flare * 0.3})`);
-      core.addColorStop(0.22, `rgba(${Math.min(r + 120, 255)},${Math.min(g + 130, 255)},255,${0.4 + bright * 0.3})`);
-      core.addColorStop(0.6, `rgba(${r},${g},${b},${0.12 + bright * 0.15})`);
-      core.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      // inner core
+      const corePulse = 1 + Math.sin(t * 5) * (act > 0.5 ? 0.18 : 0.06) + flare * 0.2;
+      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.42 * corePulse);
+      core.addColorStop(0, "rgba(255,255,255,0.95)");
+      core.addColorStop(0.25, `hsla(${p.hue}, 100%, 85%, 0.7)`);
+      core.addColorStop(1, "rgba(0,80,180,0)");
       ctx.fillStyle = core;
       ctx.beginPath();
-      ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius * 0.42 * corePulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // --- Blue flames rising off the sphere (tallest toward the top) ---
-      const flameBright = 0.12 + bright * 0.5 + flare * 0.5;
-      const flareOut = flare * R * 1.4;
-      const N = Math.max(10, Math.min(56, Math.round(30 * (cfg.density ?? 1))));
-      const tips = [];
-      for (let i = 0; i < N; i++) {
-        const a0 = (i / N) * Math.PI * 2;
-        const sway = Math.sin(t * danceSpeed + i * 1.3) * 0.12 * chaos;
-        const a = a0 + sway;
-        const topFactor = (1 - Math.sin(a)) / 2; // 1 at top, 0 at bottom
-        const flick = 0.35 + 0.65 * Math.abs(Math.sin(t * (2.4 + danceSpeed) * chaos + i * 4.7));
-        const len = (R * (0.1 + (0.12 + 0.5 * flick) * (0.4 + eff)) + flareOut * (0.5 + 0.5 * flick)) * (0.3 + topFactor * 1.05);
-        const bx = cx + Math.cos(a) * R;
-        const by = cy + Math.sin(a) * R;
-        const tang = a + Math.PI / 2;
-        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.35 * chaos * (1 - Math.min(flare * 1.2, 0.85));
-        // Flames rise: bias the tip upward (buoyancy), strongest near the top.
-        const tipx = bx + Math.cos(a) * len + Math.cos(tang) * swayAmt;
-        const tipy = by + Math.sin(a) * len + Math.sin(tang) * swayAmt - len * (0.35 + topFactor * 0.5);
-        drawFlameTongue(bx, by, tipx, tipy, R * 0.1 * (0.6 + flick), flameBright);
-        tips.push({ x: tipx, y: tipy });
-      }
+      // rim
+      ctx.strokeStyle = `hsla(${p.hue}, 100%, 80%, 0.55)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
 
-      // Faint rising embers that drift off the flame tips.
-      if (tips.length) {
-        const spawnChance = 0.22 + bright * 0.45 + flare * 1.1;
-        const spawns = (Math.random() < spawnChance ? 1 : 0) + (Math.random() < flare * 1.2 ? 1 : 0);
-        for (let k = 0; k < spawns; k++) {
-          const tip = tips[(Math.random() * tips.length) | 0];
-          embers.push({ x: tip.x + (Math.random() - 0.5) * R * 0.15, y: tip.y + (Math.random() - 0.5) * R * 0.1, vx: (Math.random() - 0.5) * 0.4, vy: -(0.25 + Math.random() * 0.55) - flare * 1.8, life: 1, rad: 0.8 + Math.random() * (1.6 + flare * 2) });
-        }
-      }
-      // Idle whisper — lone embers rise slowly even at rest.
-      if (tips.length && Math.random() < 0.03) {
-        const tip = tips[(Math.random() * tips.length) | 0];
-        embers.push({ x: tip.x, y: tip.y, vx: (Math.random() - 0.5) * 0.15, vy: -(0.12 + Math.random() * 0.18), life: 1, rad: 0.7 + Math.random() * 1 });
-      }
-      if (embers.length > 100) embers = embers.slice(embers.length - 100);
-      for (const e of embers) {
-        e.x += e.vx; e.y += e.vy; e.vy -= 0.006; e.vx *= 0.99; e.life -= 0.014;
-        if (e.life <= 0) continue;
-        const a = e.life * e.life * (0.12 + bright * 0.14);
-        const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.rad + 1.2);
-        gr.addColorStop(0, `rgba(${Math.min(tr + 80, 255)},${Math.min(tg + 60, 255)},${Math.min(tb + 50, 255)},${a})`);
-        gr.addColorStop(1, `rgba(${tr},${tg},${tb},0)`);
-        ctx.fillStyle = gr;
-        ctx.beginPath();
-        ctx.arc(e.x, e.y, e.rad + 1.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      embers = embers.filter((e) => e.life > 0 && e.y > -20);
-
-      ctx.globalCompositeOperation = "source-over";
       raf = requestAnimationFrame(render);
     };
     render();
