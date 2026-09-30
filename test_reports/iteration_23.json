@@ -1,0 +1,32 @@
+{
+  "summary": "Verified GitHub token-paste bug fix. Backend /api/github/status now correctly returns connected:false when only a self_repo doc exists (no token_enc). Frontend Settings\u2192API tab renders the GitHub card with a visible, typeable password input (settings-github-token-input) and Connect button (settings-github-connect) in the not-connected state. Bad-token connect attempt shows 'GitHub: Bad credentials' toast and status remains not connected. GithubPush dialog on /chat still renders github-token-input, and apikey-input-openai still renders. All targeted assertions pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/github/token", "issue": "Deletes the entire github_config doc (including self_repo). If a user has configured a self-update repo and then disconnects a token, self_repo is also wiped. Consider $unset only token_enc/login instead of delete_one."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_23.json"],
+  "action_items": [
+    "(Optional) In DELETE /api/github/token, use $unset on token_enc/login rather than delete_one so self_repo is preserved.",
+    "(Env note only \u2014 does not affect the fix) WEBAUTHN_RP_ID in backend/.env is set to a different preview host (e9dda036\u2026) than REACT_APP_BACKEND_URL host (prom-metrics\u2026). Passkey registration therefore fails from the prom-metrics origin ('rp.id is not a registrable domain suffix'). We worked around this by password-login (owner@example.com) + injecting the JWT into localStorage. If the app is intended to be served from prom-metrics.preview.emergentagent.com, align WEBAUTHN_RP_ID / WEBAUTHN_EXPECTED_ORIGIN to that host."
+  ],
+  "critical_code_review_comments": [
+    "gh_status() fix is minimal and correct \u2014 fetches the full doc and gates connected on token_enc presence.",
+    "GithubKeyCard renders the input whenever status is loaded (not gated on !status.connected), matching the requested behavior; placeholder/button label toggle between Connect and Update.",
+    "DELETE /api/github/token side-effect (removes self_repo) noted above."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "owner@example.com / Prometheus#2026 (password login via POST /api/auth/login; JWT injected into localStorage 'promethius_token' for UI test to avoid the RP_ID/origin mismatch that blocks passkey registration).",
+  "seed_data_creation": "None. Only transient github_config docs, all cleared via DELETE /api/github/token during test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth in this preview env: WEBAUTHN_RP_ID=e9dda036-...preview.emergentagent.com but REACT_APP_BACKEND_URL host is prom-metrics.preview.emergentagent.com \u2192 passkey registration from the prom-metrics origin fails at the browser (rp.id mismatch), and loading the app from the e9dda036 host hits CORS from CORS_ORIGINS. Easiest workaround: password-login (owner@example.com / Prometheus#2026) via /api/auth/login, then page.evaluate localStorage.setItem('promethius_token', <jwt>) on the prom-metrics origin. Settings modal is opened from the Orb via data-testid=orb-settings-button (there is NO sidebar/settings-link on / route), and the API tab via data-testid=settings-tab-api.",
+  "rca of the issue": "Root cause of the reported 'no place to paste the token' bug was two-fold: (1) GET /api/github/status returned connected:true whenever ANY github_config doc existed for the user, including a self-repo-only doc created by PUT /api/github/self-config that had no token_enc \u2014 so the UI thought GitHub was already connected; (2) the frontend GithubKeyCard hid the input when status.connected was true. Both are fixed: gh_status now returns connected only when token_enc is present, and the input renders whenever status is loaded (placeholder+button label switch to Update when connected). Verified: (a) after PUT self-config with no token, GET /api/github/status \u2192 {connected:false}; (b) POST /api/github/token with a bogus token \u2192 400 'GitHub: Bad credentials' and status stays connected:false; (c) in the UI, settings\u2192API tab shows the GitHub card with a typeable password input and a Connect button in the not-connected state."
+}

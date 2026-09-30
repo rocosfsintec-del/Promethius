@@ -2131,7 +2131,8 @@ async def gh_status(user=Depends(get_current_user)):
 
 @api_router.delete("/github/token")
 async def gh_disconnect(user=Depends(get_current_user)):
-    await db.github_config.delete_one({"user_id": user["id"]})
+    # Only drop the credential — keep self_repo / last_repo config intact.
+    await db.github_config.update_one({"user_id": user["id"]}, {"$unset": {"token_enc": "", "login": ""}})
     return {"ok": True}
 
 
