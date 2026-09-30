@@ -22,6 +22,28 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
     let embers = [];      // faint rising ember particles that drift off the flames
     let pool = 0;         // eased firelight glow that gathers beneath the orb
 
+    // Precompute an even distribution of points on a unit sphere (Fibonacci),
+    // then the fixed set of short edges between them. Because the sphere spins
+    // as a rigid body, pairwise distances never change → edges computed once.
+    const NP = 78;
+    const pts = [];
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < NP; i++) {
+      const y = 1 - (i / (NP - 1)) * 2;
+      const rad = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = i * golden;
+      pts.push({ x: Math.cos(th) * rad, y, z: Math.sin(th) * rad, ph: Math.random() * Math.PI * 2 });
+    }
+    const edges = [];
+    const TH = 0.46;
+    for (let i = 0; i < NP; i++) {
+      for (let j = i + 1; j < NP; j++) {
+        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y, dz = pts[i].z - pts[j].z;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d < TH) edges.push({ a: i, b: j, d });
+      }
+    }
+
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = canvas.clientWidth * dpr;
@@ -41,7 +63,6 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       const target = energyRef.current;
       smooth += (target - smooth) * 0.08;
       voiceSmooth += ((voiceRef ? voiceRef.current : 0) - voiceSmooth) * 0.4;
-      // Sharp flare: snap up on a syllable, ease back down.
       const vNow = voiceRef ? voiceRef.current : 0;
       flare += (vNow - flare) * (vNow > flare ? 0.6 : 0.12);
       const eff = Math.min(smooth + voiceSmooth * 1.7, 1.2);
@@ -56,19 +77,15 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       ctx.fillRect(0, 0, w, h);
 
       const base = Math.min(w, h) * cfg.size;
-      // Glow intensity multiplier (repurposed from the old "lightning" control).
       const glow = 0.55 + (cfg.lightning ?? 0.9) * 0.6;
-      // Brightness rises with heavy thought (energy) and live speech amplitude.
       let bright = Math.min((eff + voiceSmooth * 0.5) * glow, 1.5);
-      // In standby, dim right down to faint embers — but keep gently floating.
-      if (standbyRef && standbyRef.current) bright = Math.min(bright, 0.12);
-
+      if (sb) bright = Math.min(bright, 0.12);
       const chaos = cfg.chaos ?? 1;
       const danceSpeed = 0.6 + (cfg.floatSpeed ?? 0.5) * 1.3;
-      // Radius of the (invisible) sphere — gently breathes with thought/voice.
-      const R = base * (1 + 0.04 * Math.sin(t * 1.6) + bright * 0.1);
+      const R = base * (1 + 0.03 * Math.sin(t * 1.6) + bright * 0.08);
+      const webBright = 0.22 + bright * 0.55;
 
-      // Tapered, additive "flame tongue" from a base point out to a tip.
+      const lerpHex = (t2) => ({ r: r + (tr - r) * t2, g: g + (tg - g) * t2, b: b + (tb - b) * t2 });
       const drawFlameTongue = (x0, y0, x1, y1, wBase, alpha) => {
         const steps = 4;
         for (let s = 0; s < steps; s++) {
@@ -78,12 +95,11 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
           const rad = wBase * (1 - tt * 0.82) + 0.6;
           const a = alpha * (1 - tt) * (1 - tt);
           if (a <= 0.003) continue;
-          // Blend the hot core colour at the root into the cooler tip colour.
-          const cr = r + (tr - r) * tt, cg = g + (tg - g) * tt, cb = b + (tb - b) * tt;
+          const c = lerpHex(tt);
           const gg = ctx.createRadialGradient(px, py, 0, px, py, rad);
-          gg.addColorStop(0, `rgba(${Math.min(cr + 90, 255)},${Math.min(cg + 72, 255)},${Math.min(cb + 60, 255)},${a})`);
-          gg.addColorStop(0.5, `rgba(${cr},${cg},${cb},${a * 0.5})`);
-          gg.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+          gg.addColorStop(0, `rgba(${Math.min(c.r + 90, 255)},${Math.min(c.g + 72, 255)},${Math.min(c.b + 60, 255)},${a})`);
+          gg.addColorStop(0.5, `rgba(${c.r},${c.g},${c.b},${a * 0.5})`);
+          gg.addColorStop(1, `rgba(${c.r},${c.g},${c.b},0)`);
           ctx.fillStyle = gg;
           ctx.beginPath();
           ctx.arc(px, py, rad, 0, Math.PI * 2);
@@ -91,23 +107,35 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
         }
       };
 
-      // Faint spherical haze so the invisible orb still has a ghostly presence.
-      const haze = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.18);
-      haze.addColorStop(0, `rgba(${r},${g},${b},${0.015 + bright * 0.05})`);
-      haze.addColorStop(0.7, `rgba(${r},${g},${b},${0.008 + bright * 0.03})`);
-      haze.addColorStop(1, "rgba(0,0,10,0)");
-      ctx.fillStyle = haze;
+      // Translucent glass sphere body (gives the orb volume).
+      const body = ctx.createRadialGradient(cx - R * 0.22, cy - R * 0.22, R * 0.05, cx, cy, R);
+      body.addColorStop(0, `rgba(${r},${g},${b},${0.1 + bright * 0.1})`);
+      body.addColorStop(0.6, `rgba(${(r * 0.28) | 0},${(g * 0.32) | 0},${(b * 0.42) | 0},0.2)`);
+      body.addColorStop(1, "rgba(0,0,8,0.02)");
+      ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.18, 0, Math.PI * 2);
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
       ctx.fill();
 
-      // Ember glow pool — firelight gathering beneath the orb (eases in, lingers).
+      // Everything below glows additively.
+      ctx.globalCompositeOperation = "lighter";
+
+      // Outer halo / bloom around the sphere.
+      const halo = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R * 1.75);
+      halo.addColorStop(0, `rgba(${r},${g},${b},${0.05 + bright * 0.14})`);
+      halo.addColorStop(0.5, `rgba(${r},${g},${b},${0.02 + bright * 0.05})`);
+      halo.addColorStop(1, "rgba(0,0,10,0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * 1.75, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ember glow pool — firelight gathering beneath the orb.
       const poolTarget = Math.min(bright * 0.55 + flare * 0.5 + embers.length / 140, 1);
       pool += (poolTarget - pool) * (poolTarget > pool ? 0.05 : 0.02);
       if (pool > 0.01) {
         const pw = R * 2.6;
         ctx.save();
-        ctx.globalCompositeOperation = "lighter";
         ctx.translate(cx, cy + R * 1.55);
         ctx.scale(1, 0.26);
         const pg = ctx.createRadialGradient(0, 0, 0, 0, 0, pw);
@@ -121,74 +149,118 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
         ctx.restore();
       }
 
-      // Ghost flames licking around the sphere's rim/surface (additive glow).
-      ctx.globalCompositeOperation = "lighter";
-      const flameBright = 0.1 + bright * 0.5 + flare * 0.5;
-      // Voice flare pushes tongues sharply outward on each spoken syllable.
-      const flareOut = flare * R * 1.5;
-      const N = Math.max(6, Math.min(48, Math.round(24 * (cfg.density ?? 1))));
+      // --- Plasma filament web wrapping the rotating sphere ---
+      const rot = t * (0.15 + (cfg.floatSpeed ?? 0.5) * 0.3);
+      const cosY = Math.cos(rot), sinY = Math.sin(rot);
+      const tilt = 0.5, cosX = Math.cos(tilt), sinX = Math.sin(tilt);
+      const proj = new Array(NP);
+      for (let i = 0; i < NP; i++) {
+        const p = pts[i];
+        const x1 = p.x * cosY + p.z * sinY;
+        const z1 = -p.x * sinY + p.z * cosY;
+        const y2 = p.y * cosX - z1 * sinX;
+        const z2 = p.y * sinX + z1 * cosX;
+        proj[i] = { sx: cx + x1 * R, sy: cy + y2 * R, front: (z2 + 1) / 2 };
+      }
+      for (const e of edges) {
+        const A = proj[e.a], B = proj[e.b];
+        const front = (A.front + B.front) / 2;
+        const flick = 0.55 + 0.45 * Math.sin(t * 2.6 * chaos + pts[e.a].ph);
+        const a = (0.04 + front * front * 0.32 * webBright) * flick * (1 - (e.d / TH) * 0.5);
+        if (a <= 0.012) continue;
+        const lift = 0.35 + front * 0.65;
+        ctx.strokeStyle = `rgba(${Math.min(r + 70 * front, 255) | 0},${Math.min(g + 80 * front, 255) | 0},${Math.min(b + 60 * front, 255) | 0},${a})`;
+        ctx.lineWidth = 0.4 + front * 1.3;
+        ctx.beginPath();
+        ctx.moveTo(A.sx, A.sy);
+        ctx.lineTo(B.sx, B.sy);
+        ctx.stroke();
+        void lift;
+      }
+      // Bright nodes on the front of the sphere.
+      for (let i = 0; i < NP; i++) {
+        const p = proj[i];
+        if (p.front < 0.35) continue;
+        const tw = 0.6 + 0.4 * Math.sin(t * 4 * chaos + pts[i].ph);
+        const a = (p.front - 0.35) * 0.5 * webBright * tw;
+        const rad = 0.6 + p.front * 1.6;
+        const ng = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rad + 1);
+        ng.addColorStop(0, `rgba(${Math.min(r + 120, 255)},${Math.min(g + 120, 255)},255,${a})`);
+        ng.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = ng;
+        ctx.beginPath();
+        ctx.arc(p.sx, p.sy, rad + 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // --- Bright rim ring around the sphere ---
+      const rimGlow = ctx.createRadialGradient(cx, cy, R * 0.82, cx, cy, R * 1.12);
+      rimGlow.addColorStop(0, "rgba(0,0,10,0)");
+      rimGlow.addColorStop(0.72, `rgba(${r},${g},${b},${0.1 + webBright * 0.25})`);
+      rimGlow.addColorStop(0.9, `rgba(${Math.min(r + 60, 255)},${Math.min(g + 70, 255)},${Math.min(b + 70, 255)},${0.14 + webBright * 0.3})`);
+      rimGlow.addColorStop(1, "rgba(0,0,10,0)");
+      ctx.fillStyle = rimGlow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * 1.12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${Math.min(r + 90, 255)},${Math.min(g + 100, 255)},255,${0.4 + webBright * 0.45})`;
+      ctx.lineWidth = 1.2 + bright * 1.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // --- Ignited core ---
+      const coreR = R * (0.55 + 0.06 * Math.sin(t * 3) + flare * 0.3);
+      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+      core.addColorStop(0, `rgba(255,255,255,${0.55 + bright * 0.35 + flare * 0.3})`);
+      core.addColorStop(0.22, `rgba(${Math.min(r + 120, 255)},${Math.min(g + 130, 255)},255,${0.4 + bright * 0.3})`);
+      core.addColorStop(0.6, `rgba(${r},${g},${b},${0.12 + bright * 0.15})`);
+      core.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- Blue flames rising off the sphere (tallest toward the top) ---
+      const flameBright = 0.12 + bright * 0.5 + flare * 0.5;
+      const flareOut = flare * R * 1.4;
+      const N = Math.max(10, Math.min(56, Math.round(30 * (cfg.density ?? 1))));
       const tips = [];
       for (let i = 0; i < N; i++) {
         const a0 = (i / N) * Math.PI * 2;
-        const sway = Math.sin(t * danceSpeed + i * 1.3) * 0.13 * chaos;
+        const sway = Math.sin(t * danceSpeed + i * 1.3) * 0.12 * chaos;
         const a = a0 + sway;
+        const topFactor = (1 - Math.sin(a)) / 2; // 1 at top, 0 at bottom
         const flick = 0.35 + 0.65 * Math.abs(Math.sin(t * (2.4 + danceSpeed) * chaos + i * 4.7));
-        const len = R * (0.16 + 0.55 * flick * (0.45 + eff)) + flareOut * (0.6 + 0.4 * flick);
+        const len = (R * (0.1 + (0.12 + 0.5 * flick) * (0.4 + eff)) + flareOut * (0.5 + 0.5 * flick)) * (0.3 + topFactor * 1.05);
         const bx = cx + Math.cos(a) * R;
         const by = cy + Math.sin(a) * R;
         const tang = a + Math.PI / 2;
-        // Straighten the sway when flaring so flames shoot outward sharply.
-        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.4 * chaos * (1 - Math.min(flare * 1.2, 0.85));
+        const swayAmt = Math.sin(t * danceSpeed * 1.5 + i) * len * 0.35 * chaos * (1 - Math.min(flare * 1.2, 0.85));
+        // Flames rise: bias the tip upward (buoyancy), strongest near the top.
         const tipx = bx + Math.cos(a) * len + Math.cos(tang) * swayAmt;
-        const tipy = by + Math.sin(a) * len + Math.sin(tang) * swayAmt;
-        drawFlameTongue(bx, by, tipx, tipy, R * 0.12 * (0.6 + flick), flameBright);
+        const tipy = by + Math.sin(a) * len + Math.sin(tang) * swayAmt - len * (0.35 + topFactor * 0.5);
+        drawFlameTongue(bx, by, tipx, tipy, R * 0.1 * (0.6 + flick), flameBright);
         tips.push({ x: tipx, y: tipy });
       }
-      // A few faint licks across the FRONT surface so it feels wrapped in fire.
-      const M = Math.max(4, Math.round(9 * (cfg.density ?? 1)));
-      for (let i = 0; i < M; i++) {
-        const ang = t * 0.35 * danceSpeed + i * ((Math.PI * 2) / M);
-        const rr = R * (0.28 + 0.55 * Math.abs(Math.sin(t * 0.7 + i * 1.7)));
-        const bx = cx + Math.cos(ang) * rr;
-        const by = cy + Math.sin(ang) * rr;
-        const flick = Math.abs(Math.sin(t * 3.6 * chaos + i * 2.3));
-        const len = R * 0.13 * (0.5 + eff);
-        drawFlameTongue(bx, by, bx + Math.sin(t * 2 + i) * len * 0.5, by - len * (0.5 + flick), R * 0.06, flameBright * 0.55);
-      }
 
-      // Faint rising embers that drift off the flame tips for a ghostly atmosphere.
+      // Faint rising embers that drift off the flame tips.
       if (tips.length) {
         const spawnChance = 0.22 + bright * 0.45 + flare * 1.1;
         const spawns = (Math.random() < spawnChance ? 1 : 0) + (Math.random() < flare * 1.2 ? 1 : 0);
         for (let k = 0; k < spawns; k++) {
           const tip = tips[(Math.random() * tips.length) | 0];
-          embers.push({
-            x: tip.x + (Math.random() - 0.5) * R * 0.15,
-            y: tip.y + (Math.random() - 0.5) * R * 0.1,
-            vx: (Math.random() - 0.5) * 0.4,
-            vy: -(0.25 + Math.random() * 0.55) - flare * 1.8,
-            life: 1,
-            rad: 0.8 + Math.random() * (1.6 + flare * 2),
-          });
+          embers.push({ x: tip.x + (Math.random() - 0.5) * R * 0.15, y: tip.y + (Math.random() - 0.5) * R * 0.1, vx: (Math.random() - 0.5) * 0.4, vy: -(0.25 + Math.random() * 0.55) - flare * 1.8, life: 1, rad: 0.8 + Math.random() * (1.6 + flare * 2) });
         }
       }
-      // Idle whisper — a few lone embers rise slowly even at rest, so it's never fully still.
+      // Idle whisper — lone embers rise slowly even at rest.
       if (tips.length && Math.random() < 0.03) {
         const tip = tips[(Math.random() * tips.length) | 0];
-        embers.push({
-          x: tip.x, y: tip.y,
-          vx: (Math.random() - 0.5) * 0.15,
-          vy: -(0.12 + Math.random() * 0.18),
-          life: 1, rad: 0.7 + Math.random() * 1,
-        });
+        embers.push({ x: tip.x, y: tip.y, vx: (Math.random() - 0.5) * 0.15, vy: -(0.12 + Math.random() * 0.18), life: 1, rad: 0.7 + Math.random() * 1 });
       }
       if (embers.length > 100) embers = embers.slice(embers.length - 100);
       for (const e of embers) {
-        e.x += e.vx;
-        e.y += e.vy;
-        e.vy -= 0.006;        // buoyancy — keep rising
-        e.vx *= 0.99;
-        e.life -= 0.014;
+        e.x += e.vx; e.y += e.vy; e.vy -= 0.006; e.vx *= 0.99; e.life -= 0.014;
         if (e.life <= 0) continue;
         const a = e.life * e.life * (0.12 + bright * 0.14);
         const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.rad + 1.2);
@@ -200,8 +272,8 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
         ctx.fill();
       }
       embers = embers.filter((e) => e.life > 0 && e.y > -20);
-      ctx.globalCompositeOperation = "source-over";
 
+      ctx.globalCompositeOperation = "source-over";
       raf = requestAnimationFrame(render);
     };
     render();
