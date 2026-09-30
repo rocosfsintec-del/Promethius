@@ -3,7 +3,6 @@ import { X, Check, Loader2, Volume2, Trash2, Mic2, ScrollText, Users, Shield, Fi
 import { startRegistration } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import api from "../lib/api";
-import { useAuth } from "../context/AuthContext";
 import { DEFAULT_ORB, ORB_PRESETS, ORB_TIP_PRESETS, ORB_MOODS } from "../lib/orbConfig";
 import InstallButton from "./InstallButton";
 
@@ -378,8 +377,6 @@ function GithubKeyCard() {
 }
 
 function ApiKeysTab() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
   const [status, setStatus] = useState(null);
   const [vals, setVals] = useState({});
   const [saving, setSaving] = useState(false);
@@ -442,7 +439,7 @@ function ApiKeysTab() {
                   <span data-testid={`apikey-status-${f.id}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/10">not set</span>
                 )}
               </div>
-              {set && isAdmin && (
+              {set && (
                 <button data-testid={`apikey-clear-${f.id}`} onClick={() => clear(f.id)} disabled={saving}
                   className="text-zinc-600 hover:text-red-400 transition-colors" title="Remove key">
                   <Trash2 size={14} />
@@ -454,7 +451,6 @@ function ApiKeysTab() {
               data-testid={`apikey-input-${f.id}`}
               type="password"
               autoComplete="off"
-              disabled={!isAdmin}
               placeholder={set ? "•••••••• (saved — paste to replace)" : `Paste your ${f.label} key`}
               value={vals[f.id] || ""}
               onChange={(e) => setVals((v) => ({ ...v, [f.id]: e.target.value }))}
@@ -463,12 +459,10 @@ function ApiKeysTab() {
           </div>
         );
       })}
-      {isAdmin && (
-        <button data-testid="save-apikeys-button" onClick={save} disabled={saving}
-          className="w-full py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60">
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Save API Keys
-        </button>
-      )}
+      <button data-testid="save-apikeys-button" onClick={save} disabled={saving}
+        className="w-full py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60">
+        {saving ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Save API Keys
+      </button>
       <p className="text-[11px] text-zinc-600 leading-relaxed">
         Keys are encrypted at rest and never sent back to the browser. Leave a field blank to keep the current value.
       </p>

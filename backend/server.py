@@ -1423,7 +1423,7 @@ async def get_keys(user=Depends(get_current_user)):
 
 
 @api_router.put("/settings/keys")
-async def set_keys(req: KeysReq, user=Depends(require_admin)):
+async def set_keys(req: KeysReq, user=Depends(get_current_user)):
     doc = await db.app_config.find_one({"id": "secrets"}, {"_id": 0}) or {"id": "secrets"}
     payload = req.model_dump()
     for f in SECRET_FIELDS:
