@@ -124,7 +124,8 @@ STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", str(Path(__file__).parent / "st
 PROVIDERS = {
     "openai": ["gpt-4o-mini", "gpt-4o", "gpt-5.5"],
     "anthropic": ["claude-sonnet-5-5", "claude-sonnet-5", "claude-opus-5-5",
-                  "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
+                  "claude-opus-4-8", "claude-sonnet-4-6", "claude-opus-4-7",
+                  "claude-haiku-4-5"],
     "ollama": ["llama3.1", "mistral", "qwen2.5"],
 }
 
@@ -613,14 +614,13 @@ def openai_client(provider: str):
     # Local offline models via Ollama's OpenAI-compatible endpoint.
     if provider == "ollama":
         return AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)
-    # Native OpenAI key (pasted or env) takes priority for OpenAI models.
-    if provider == "openai" and OPENAI_API_KEY:
-        return AsyncOpenAI(api_key=OPENAI_API_KEY)
-    # Otherwise fall back to the Emergent Universal Key via its OpenAI-compatible
-    # proxy. This serves both OpenAI *and* Anthropic model names (LiteLLM routes
-    # by model name), so chat works with zero configuration.
+    # Emergent Universal Key is the PRIMARY path. Its OpenAI-compatible proxy serves
+    # both OpenAI *and* Anthropic model names (LiteLLM routes by model name).
     if EMERGENT_LLM_KEY:
         return AsyncOpenAI(api_key=EMERGENT_LLM_KEY, base_url=EMERGENT_LLM_BASE)
+    # Fall back to a native pasted/env OpenAI key when no Universal Key is present.
+    if provider == "openai" and OPENAI_API_KEY:
+        return AsyncOpenAI(api_key=OPENAI_API_KEY)
     return AsyncOpenAI(api_key=OPENAI_API_KEY or "missing")
 
 
@@ -850,7 +850,9 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
     if doc_text:
         user_text = f"{user_text}\n\nAttached documents:\n{doc_text}"
 
-    if provider == "anthropic" and ANTHROPIC_API_KEY:
+    # Universal Key is primary; only use the native Anthropic SDK as a fallback
+    # when no Universal Key is configured.
+    if provider == "anthropic" and not EMERGENT_LLM_KEY and ANTHROPIC_API_KEY:
         clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
         msgs = [{"role": m["role"], "content": m["content"]} for m in history[:-1]]
 
@@ -1427,7 +1429,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
             hist = history
             if doc_text:
                 hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
-            if req.provider == "anthropic" and ANTHROPIC_API_KEY:
+            if req.provider == "anthropic" and not EMERGENT_LLM_KEY and ANTHROPIC_API_KEY:
                 reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
             else:
                 reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid)

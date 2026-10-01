@@ -104,3 +104,13 @@ User asked to pull the repo into a fresh workspace and repair it.
 ## Orb replaced with user's LLMOrb (2026-06)
 - Ported the user's exact LLMOrb canvas (energy sphere + bright pulsing core + rim + 26 curved flame tongues, hue-based) into pages/Orb.jsx useOrbCanvas.
 - Driven by live energy/voice: activity maps to their idle/thinking/speaking params (pulse/swirl/brightness/flicker). Color picker -> hue (hexToHue), size -> radius, density -> flame count, chaos -> flicker, floatSpeed -> bob, lightning -> brightness; standby dims, green flash -> hue 140. tipColor now unused by this orb (kept in settings, harmless).
+
+## LLM key priority inverted + Opus 4.8 (2026-06)
+- Per user choice, Emergent Universal Key is now PRIMARY for LLM chat; pasted/env
+  BYO OpenAI/Anthropic keys are fallback-only (used only when EMERGENT_LLM_KEY absent).
+  Changed openai_client(), run_llm() anthropic branch, and the chat tools dispatch
+  (all now gated on `not EMERGENT_LLM_KEY`). Universal proxy routes both OpenAI and
+  Anthropic model names via LiteLLM. Verified gpt-4o-mini + claude-sonnet-5 return OK.
+- Added `claude-opus-4-8` ("Claude Opus 4.8") to PROVIDERS["anthropic"] and to
+  ChatPanel MODEL_LABELS / MODEL_COST (expensive) / MODEL_PRICING ([15,75]).
+  Confirmed the model ID resolves through the Universal proxy (claude-opus-4-8, not 4.8).

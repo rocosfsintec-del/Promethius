@@ -15,6 +15,7 @@ const MODEL_LABELS = {
   "claude-sonnet-5-5": "Claude Sonnet 5.5",
   "claude-sonnet-5": "Claude Sonnet 5",
   "claude-opus-5-5": "Claude Opus 5.5",
+  "claude-opus-4-8": "Claude Opus 4.8",
   "claude-sonnet-4-6": "Claude Sonnet 4.6",
   "claude-opus-4-7": "Claude Opus 4.7",
   "claude-haiku-4-5": "Claude Haiku 4.5",
@@ -33,6 +34,7 @@ const MODEL_COST = {
   "claude-sonnet-5": "moderate",
   "claude-sonnet-4-6": "moderate",
   "claude-opus-5-5": "expensive",
+  "claude-opus-4-8": "expensive",
   "claude-opus-4-7": "expensive",
   "llama3.1": "free",
   "mistral": "free",
@@ -63,6 +65,7 @@ const MODEL_PRICING = {
   "claude-sonnet-5": [3, 15],
   "claude-sonnet-4-6": [3, 15],
   "claude-opus-5-5": [15, 75],
+  "claude-opus-4-8": [15, 75],
   "claude-opus-4-7": [15, 75],
 };
 // Representative message used for the dropdown estimate.
