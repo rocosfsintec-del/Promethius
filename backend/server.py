@@ -946,6 +946,50 @@ def _make_push_proposal(repo_url, branch, message, files, create_branch, open_pr
             "files": clean, "create_branch": bool(create_branch), "open_pr": bool(open_pr)}
 
 
+async def _make_self_update_proposal(user_id, paths, message, branch, open_pr):
+    """Build a push proposal for Promethius's OWN source, reading file content
+    from disk (no LLM inlining) so any file size works reliably."""
+    cfg = await db.github_config.find_one({"user_id": user_id}) or {}
+    self_repo = cfg.get("self_repo") or DEFAULT_SELF_REPO
+    root = APP_ROOT.resolve()
+    wanted = [p.lstrip("/") for p in paths if p and p.strip()] if paths else _list_self_paths()
+    files, skipped, total = [], [], 0
+    for rel in wanted:
+        target = (APP_ROOT / rel).resolve()
+        if not str(target).startswith(str(root)) or not target.is_file():
+            skipped.append({"path": rel, "reason": "not found"})
+            continue
+        try:
+            size = target.stat().st_size
+            if size > _SELF_MAX_FILE_BYTES:
+                skipped.append({"path": rel, "reason": f"large ({size} bytes)"})
+                continue
+            if total + size > _SELF_BUNDLE_MAX_BYTES:
+                skipped.append({"path": rel, "reason": "bundle size limit"})
+                continue
+            content = target.read_text(encoding="utf-8")
+        except Exception:
+            skipped.append({"path": rel, "reason": "not text"})
+            continue
+        total += size
+        files.append({"path": rel, "content": content})
+    if not files:
+        return {"error": "No readable source files matched those paths."}
+    open_pr = True if open_pr is None else bool(open_pr)
+    branch = branch or "promethius-self-update"
+    owner, repo = _parse_repo_url(self_repo)
+    token = await _gh_token(user_id)
+    default_branch = await _repo_default_branch(token, owner, repo)
+    await _remember_repo(user_id, owner, repo)
+    prop = {"repo_url": self_repo, "owner": owner, "repo": repo, "full_name": f"{owner}/{repo}",
+            "branch": branch, "message": message or "Self-update from Promethius",
+            "files": files, "create_branch": branch != default_branch, "open_pr": open_pr,
+            "default_branch": default_branch}
+    return {"status": "proposal_ready",
+            "note": "A review dialog will open for the user to approve. Do NOT claim it is pushed yet.",
+            "proposal": prop, "file_count": len(files), "skipped": skipped[:30]}
+
+
 async def _exec_gh_tool(name, args, user_id):
     try:
         if name == "list_github_files":
@@ -969,6 +1013,10 @@ async def _exec_gh_tool(name, args, user_id):
                                               {"$set": {"self_repo": f"{owner}/{repo}"}})
             return {"status": "ok", "self_repo": f"{owner}/{repo}",
                     "note": "Saved. From now on 'your own code'/'update yourself' refers to this repo."}
+        if name == "propose_self_update":
+            return await _make_self_update_proposal(
+                user_id, args.get("paths"), args.get("message"),
+                args.get("branch"), args.get("open_pr"))
     except HTTPException as e:
         return {"error": str(e.detail)}
     except Exception as e:
@@ -1052,6 +1100,15 @@ _GH_TOOLS_OPENAI = [
     {"type": "function", "function": {
         "name": "set_self_repo", "description": "Record which GitHub repo IS Promethius's own source code. Call this when the user tells you your repo, so later 'update yourself'/'your own code' works without a URL.",
         "parameters": {"type": "object", "properties": {"repo_url": {"type": "string"}}, "required": ["repo_url"]}}},
+    {"type": "function", "function": {
+        "name": "propose_self_update",
+        "description": "Push Promethius's OWN current source code to its own GitHub repo WITHOUT you having to paste file contents. Use this for any 'update yourself', 'push your code', 'sync your source', or 'commit yourself to GitHub' request. The backend reads the real, up-to-date file contents from disk, so it works for files of ANY size (unlike propose_github_push, which requires inlining content and fails on large files). Opens a review dialog for approval.",
+        "parameters": {"type": "object", "properties": {
+            "paths": {"type": "array", "items": {"type": "string"}, "description": "Optional list of source file paths to push (relative to repo root, e.g. 'frontend/src/pages/Orb.jsx'). Omit or leave empty to push Promethius's ENTIRE current source."},
+            "message": {"type": "string", "description": "Commit message"},
+            "branch": {"type": "string", "description": "Target branch; defaults to a review branch 'promethius-self-update'"},
+            "open_pr": {"type": "boolean", "description": "Open a pull request (recommended, default true)"}},
+            "required": ["message"]}}},
 ]
 
 _GH_TOOLS_ANTHROPIC = [
@@ -1088,13 +1145,20 @@ PDF_TOOL_GUIDANCE = (
 GH_TOOL_GUIDANCE = (
     "\n\n=== GITHUB ABILITIES ===\n"
     "You can act on GitHub using these tools: list_github_files, read_github_file, "
-    "propose_github_push, and set_self_repo. When the user asks you to pull, open, read, review, analyze, "
-    "or change a GitHub repo, CALL these tools with the repo URL — do not say you lack access or ask them "
-    "to paste code.\n"
-    "IMPORTANT: Only call propose_github_push when the user's CURRENT message explicitly asks you to commit, "
+    "propose_github_push, propose_self_update, and set_self_repo. When the user asks you to pull, open, "
+    "read, review, analyze, or change a GitHub repo, CALL these tools with the repo URL — do not say you "
+    "lack access or ask them to paste code.\n"
+    "CRITICAL — pushing YOUR OWN code: when the user asks you to 'update yourself', 'push your code', "
+    "'sync your source', 'commit yourself', or update Promethius's own repo, ALWAYS use propose_self_update "
+    "(give it the file paths you changed, or omit paths to push your entire current source). It reads the "
+    "real file contents from disk, so it works for files of ANY size. NEVER try to push your own large source "
+    "files through propose_github_push by pasting their contents — that payload gets truncated and fails.\n"
+    "Use propose_github_push only for writing NEW/small file content the user explicitly provided, to an "
+    "EXTERNAL repo, and push ONE small file per call.\n"
+    "IMPORTANT: Only call a push tool when the user's CURRENT message explicitly asks you to commit, "
     "push, save, apply, or write changes to a repo. For questions, reads, reviews, greetings, casual chat, or "
-    "any message that does not clearly request a write, DO NOT call propose_github_push. Never re-propose a "
-    "push on a follow-up message unless the user asks again. propose_github_push opens a review dialog for the "
+    "any message that does not clearly request a write, DO NOT call a push tool. Never re-propose a "
+    "push on a follow-up message unless the user asks again. The push tools open a review dialog for the "
     "user to approve, so never claim something was pushed until they approve. When a push opens a pull request, "
     "a clear PR summary is generated automatically. If the user tells you which repo is YOUR OWN code, call "
     "set_self_repo. If a tool says GitHub is not connected, tell the user to connect their token via the GitHub "
@@ -1111,22 +1175,34 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
     all_tools = _GH_TOOLS_OPENAI + _PDF_TOOLS_OPENAI
     pdf_tool_names = {t["function"]["name"] for t in _PDF_TOOLS_OPENAI}
     for _ in range(6):
-        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=all_tools, max_tokens=8192)
-        msg = resp.choices[0].message
+        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=all_tools, max_tokens=16000)
+        choice = resp.choices[0]
+        msg = choice.message
         if not msg.tool_calls:
             return (msg.content or ""), proposal
         msgs.append({"role": "assistant", "content": msg.content or "",
                      "tool_calls": [tc.model_dump() for tc in msg.tool_calls]})
         for tc in msg.tool_calls:
+            raw_args = tc.function.arguments or "{}"
             try:
-                args = json.loads(tc.function.arguments or "{}")
+                args = json.loads(raw_args)
+                parse_ok = True
             except Exception:
                 args = {}
-            if tc.function.name in pdf_tool_names:
+                parse_ok = False
+            if not parse_ok:
+                # Arguments were cut off (usually a huge inlined file) -> invalid JSON.
+                logger.warning(f"tool-call args unparseable ({tc.function.name}, {len(raw_args)} chars, "
+                               f"finish_reason={choice.finish_reason})")
+                result = {"error": "Your tool arguments were truncated and could not be parsed — this "
+                          "usually means a file's content was too large to inline. For pushing Promethius's "
+                          "OWN source, use propose_self_update with file paths (it reads content from disk). "
+                          "Otherwise push ONE small file per call."}
+            elif tc.function.name in pdf_tool_names:
                 result = await _exec_pdf_tool(tc.function.name, args, user_id)
             else:
                 result = await _exec_gh_tool(tc.function.name, args, user_id)
-            if tc.function.name == "propose_github_push" and result.get("proposal"):
+            if result.get("proposal"):
                 proposal = result["proposal"]
             tool_content = json.dumps(result)
             if len(tool_content) > 40000 and "proposal" in result:
@@ -1144,7 +1220,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     all_tools = _GH_TOOLS_ANTHROPIC + _PDF_TOOLS_ANTHROPIC
     pdf_tool_names = {t["name"] for t in _PDF_TOOLS_ANTHROPIC}
     for _ in range(6):
-        resp = await clt.messages.create(model=model, max_tokens=8192, system=system_prompt,
+        resp = await clt.messages.create(model=model, max_tokens=16000, system=system_prompt,
                                          messages=msgs, tools=all_tools)
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
         if not tool_uses:
@@ -1156,7 +1232,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
                 result = await _exec_pdf_tool(tu.name, tu.input or {}, user_id)
             else:
                 result = await _exec_gh_tool(tu.name, tu.input or {}, user_id)
-            if tu.name == "propose_github_push" and result.get("proposal"):
+            if result.get("proposal"):
                 proposal = result["proposal"]
             tool_content = json.dumps(result)
             if len(tool_content) > 40000 and "proposal" in result:
@@ -2115,8 +2191,8 @@ GH_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "
 _SELF_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".css", ".json", ".md", ".html", ".txt"}
 # The repo that IS Promethius's own source (overridable via env / set_self_repo tool).
 DEFAULT_SELF_REPO = os.environ.get("SELF_REPO", "rocosfsintec-del/Promethius")
-_SELF_MAX_FILE_BYTES = 120_000        # skip any single file larger than this
-_SELF_BUNDLE_MAX_BYTES = 3_000_000    # total cap for a full-source bundle
+_SELF_MAX_FILE_BYTES = 500_000        # skip any single file larger than this
+_SELF_BUNDLE_MAX_BYTES = 5_000_000    # total cap for a full-source bundle
 _SELF_SKIP_DIRS = {"node_modules", "__pycache__", "build", ".git", "dist", ".next", "coverage",
                    "venv", ".venv", ".pytest_cache", "storage", "test_reports", "memory", ".emergent"}
 
@@ -2168,7 +2244,7 @@ class GithubCommitReq(BaseModel):
 
 async def _gh_token(user_id: str) -> str:
     doc = await db.github_config.find_one({"user_id": user_id})
-    if not doc:
+    if not doc or not doc.get("token_enc"):
         raise HTTPException(status_code=400, detail="GitHub is not connected. Add a personal access token first.")
     return _gh_fernet.decrypt(doc["token_enc"].encode()).decode()
 

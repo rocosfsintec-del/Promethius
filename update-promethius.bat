@@ -15,6 +15,10 @@ echo.
 cd /d "%ROOT%"
 echo Promethius update started %date% %time% > "%LOG%"
 
+REM --- Never let git/ssh hang waiting for interactive input -----------
+set "GIT_TERMINAL_PROMPT=0"
+set "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+
 REM --- 0) Must be a real git clone -------------------------------------
 if not exist ".git" (
     echo ERROR: This folder is not a git clone ^(no .git folder found^).
@@ -53,11 +57,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- 2) Figure out the default branch (usually main) ----------------
+REM --- 2) Figure out the default branch (local only — never hangs) ----
 echo [3/6] Determining default branch...
 set "BRANCH=main"
-git remote set-head origin -a >> "%LOG%" 2>&1
 for /f "tokens=2 delims=/" %%b in ('git rev-parse --abbrev-ref origin/HEAD 2^>nul') do set "BRANCH=%%b"
+REM Fall back to main if origin/HEAD isn't set or the branch is missing.
+git show-ref --verify --quiet "refs/remotes/origin/%BRANCH%" || set "BRANCH=main"
 echo    default branch: %BRANCH%
 echo default branch: %BRANCH% >> "%LOG%"
 
