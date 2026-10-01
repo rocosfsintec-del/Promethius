@@ -123,8 +123,9 @@ STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", str(Path(__file__).parent / "st
 
 PROVIDERS = {
     "openai": ["gpt-4o-mini", "gpt-4o", "gpt-5.5"],
-    "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
-    "ollama": ["llama2-uncensored", "llama3.1", "mistral", "qwen2.5"],
+    "anthropic": ["claude-sonnet-5-5", "claude-sonnet-5", "claude-opus-5-5",
+                  "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
+    "ollama": ["llama3.1", "mistral", "qwen2.5"],
 }
 
 PERSONA = (
@@ -1330,6 +1331,8 @@ async def models(user=Depends(get_current_user)):
             seen = set(result["ollama"])
             for name in installed:
                 short = name[:-7] if name.endswith(":latest") else name
+                if "llama2-uncensored" in short.lower():
+                    continue  # explicitly hidden from the model picker
                 if short not in seen:
                     result["ollama"].append(short)
                     seen.add(short)

@@ -112,3 +112,10 @@
 - Frontend Auth.jsx login screen: "Restore last good version" button (data-testid restore-last-good) with confirm → POST /system/restore → toast.
 - GH_TOOL_GUIDANCE: AUTO-FIX ON REJECTION — when a push returns 'Refusing to push' (syntax guard), the model must fix the listed file/line and re-call the push tool in the SAME turn, retrying until accepted; never claim success on a rejected push.
 - Deploy: FRONTEND changed → Save to GitHub → git reset --hard origin/main → yarn.cmd build → restart backend.
+
+## Newer Claude models + removed Llama 2 Uncensored (2026-10 — E1)
+- Added (verified routing via Emergent Universal Key proxy, returns replies): claude-sonnet-5-5, claude-sonnet-5, claude-opus-5-5. Kept existing claude-sonnet-4-6 / opus-4-7 / haiku-4-5 (additive, per user "add all 3").
+- Model IDs confirmed via integration_expert available_models list (not guessed). No LlmChat switch — existing OpenAI-compatible proxy routes the new IDs fine.
+- Backend PROVIDERS["anthropic"] updated; PROVIDERS["ollama"] dropped "llama2-uncensored"; /models merge now filters out any installed model containing "llama2-uncensored" so it can't reappear from the user's local Ollama.
+- Frontend ChatPanel MODEL_LABELS / MODEL_COST / MODEL_PRICING updated: Sonnet 5.5 & 5 = moderate tier [3,15], Opus 5.5 = premium [15,75] (representative pricing for the estimate chip; exact figures not published). Removed llama2-uncensored entries.
+- Deploy: FRONTEND changed → Save to GitHub → git reset --hard origin/main → yarn.cmd build → restart backend.
