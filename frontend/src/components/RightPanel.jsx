@@ -25,33 +25,127 @@ const Field = (props) => (
   />
 );
 
+const CAT_COLORS = {
+  identity: "text-sky-400 bg-sky-500/10 border-sky-500/20",
+  preference: "text-orange-400 bg-orange-500/10 border-orange-500/20",
+  goal: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+  project: "text-violet-400 bg-violet-500/10 border-violet-500/20",
+  relationship: "text-pink-400 bg-pink-500/10 border-pink-500/20",
+  fact: "text-zinc-400 bg-white/5 border-white/10",
+};
+
+function ImportanceBar({ value, onChange }) {
+  const v = value || 3;
+  return (
+    <div className="flex items-center gap-0.5" data-testid="memory-importance">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          data-testid={`importance-dot-${n}`}
+          onClick={() => onChange(n)}
+          title={`Set importance ${n}/5`}
+          className={`w-3 h-1.5 rounded-full transition-colors ${n <= v ? "bg-orange-500" : "bg-white/10 hover:bg-white/25"}`}
+        />
+      ))}
+    </div>
+  );
+}
+
 function Memory() {
   const [items, setItems] = useState([]);
+  const [stats, setStats] = useState(null);
   const [val, setVal] = useState("");
-  const load = () => api.get("/memory").then((r) => setItems(r.data));
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState("all");
+
+  const load = async () => {
+    const [m, s] = await Promise.all([
+      api.get("/memory"),
+      api.get("/memory/stats").catch(() => ({ data: null })),
+    ]);
+    setItems(m.data);
+    setStats(s.data);
+  };
   useEffect(() => { load(); }, []);
+
   const add = async () => {
     if (!val.trim()) return;
     await api.post("/memory", { content: val });
     setVal("");
     load();
   };
+  const setImportance = async (id, importance) => {
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, importance } : x)));
+    try { await api.patch(`/memory/${id}`, { importance }); } catch { toast.error("Could not update importance"); }
+  };
+  const del = async (id) => { await api.delete(`/memory/${id}`); load(); };
+
+  const catOf = (m) => m.category || "fact";
+  const q = query.trim().toLowerCase();
+  const shown = items
+    .filter((m) => cat === "all" || catOf(m) === cat)
+    .filter((m) => !q || (m.content || "").toLowerCase().includes(q))
+    .sort((a, b) => (b.importance || 3) - (a.importance || 3));
+  const cats = ["all", ...Object.keys(stats?.by_category || {})];
+
   return (
     <div className="space-y-4">
-      <p className="text-xs text-zinc-500 leading-relaxed">Facts Promethius permanently remembers about you. Injected into every conversation.</p>
+      <p className="text-xs text-zinc-500 leading-relaxed">Facts Promethius remembers about you. The most important and relevant are injected into every conversation.</p>
+
+      {stats && (
+        <div data-testid="memory-stats" className="grid grid-cols-4 gap-2 bg-[#121214] border border-white/5 rounded-xl p-3 text-center">
+          <div><div className="text-lg font-semibold text-orange-400">{stats.total}</div><div className="text-[10px] text-zinc-500">memories</div></div>
+          <div><div className="text-lg font-semibold text-sky-400">{stats.total_recall ?? 0}</div><div className="text-[10px] text-zinc-500">recalls</div></div>
+          <div><div className="text-lg font-semibold text-emerald-400">{stats.by_source?.auto ?? 0}</div><div className="text-[10px] text-zinc-500">auto</div></div>
+          <div><div className="text-lg font-semibold text-violet-400">{stats.by_source?.manual ?? 0}</div><div className="text-[10px] text-zinc-500">manual</div></div>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Field data-testid="memory-input" value={val} onChange={(e) => setVal(e.target.value)} placeholder="e.g. I prefer concise answers" onKeyDown={(e) => e.key === "Enter" && add()} />
         <button data-testid="add-memory-button" onClick={add} className="shrink-0 h-9 w-9 rounded-lg bg-orange-600 hover:bg-orange-500 flex items-center justify-center"><Plus size={16} /></button>
       </div>
-      <div className="space-y-2">
-        {items.map((m) => (
-          <div key={m.id} data-testid="memory-fact-item" className="group flex items-start gap-2 bg-[#121214] border border-white/5 rounded-xl p-3">
-            <Brain size={14} className="text-orange-500/70 mt-0.5 shrink-0" />
-            <span className="flex-1 text-sm text-zinc-300">{m.content}</span>
-            <button onClick={async () => { await api.delete(`/memory/${m.id}`); load(); }} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400"><Trash2 size={14} /></button>
-          </div>
+
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+        <Field data-testid="memory-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search memories" className="pl-9" />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {cats.map((c) => (
+          <button
+            key={c}
+            data-testid={`memory-cat-${c}`}
+            onClick={() => setCat(c)}
+            className={`text-[11px] px-2 py-1 rounded-full border capitalize transition-colors ${cat === c ? "bg-orange-600 border-orange-500 text-white" : "bg-white/5 border-white/10 text-zinc-400 hover:text-zinc-200"}`}
+          >
+            {c}{c !== "all" && stats?.by_category?.[c] ? ` ${stats.by_category[c]}` : ""}
+          </button>
         ))}
-        {items.length === 0 && <p className="text-zinc-600 text-sm">No memories yet.</p>}
+      </div>
+
+      <div className="space-y-2">
+        {shown.map((m) => {
+          const c = catOf(m);
+          return (
+            <div key={m.id} data-testid="memory-fact-item" className="group bg-[#121214] border border-white/5 rounded-xl p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <Brain size={14} className="text-orange-500/70 mt-0.5 shrink-0" />
+                <span className="flex-1 text-sm text-zinc-300">{m.content}</span>
+                <button onClick={() => del(m.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400"><Trash2 size={14} /></button>
+              </div>
+              <div className="flex items-center justify-between pl-6">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border capitalize ${CAT_COLORS[c] || CAT_COLORS.fact}`}>{c}</span>
+                  <span className="text-[10px] text-zinc-600">{m.auto ? "auto" : "manual"}</span>
+                  {!!m.recall_count && <span className="text-[10px] text-sky-500/80">· recalled {m.recall_count}×</span>}
+                </div>
+                <ImportanceBar value={m.importance} onChange={(n) => setImportance(m.id, n)} />
+              </div>
+            </div>
+          );
+        })}
+        {shown.length === 0 && <p className="text-zinc-600 text-sm">No memories{q || cat !== "all" ? " match" : " yet"}.</p>}
       </div>
     </div>
   );

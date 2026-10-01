@@ -97,3 +97,10 @@
 - server.py wiring (all defensive, guarded import `import memory_engine as _mem`, every call try/except with legacy fallback): build_system_prompt now uses _recall_block() → ranked memory injection + best-effort recall_count $inc; extract_and_store_memory + manual add_memory enrich new rows with category/importance/recall_count; new GET /api/memory/search?q= and GET /api/memory/stats.
 - Verified: ast.parse both files OK; imported and unit-exercised memory_engine (rank/search/categorize/stats/enrich correct); backend boots clean; curl /memory/stats, /memory/search, and /chat (exercises build_system_prompt) all 200. BACKEND-ONLY → no yarn build needed.
 - Deploy: Save to GitHub → git fetch origin → git reset --hard origin/main → restart backend. (Save-to-GitHub overwrites the broken self-pushed memory commits with this verified version.)
+
+## Memory panel upgrade + push syntax-guard + importance editing (2026-10 — E1)
+- Backend: new `PATCH /api/memory/{mid}` (importance 1-5 clamped, optional content edit with re-categorize). Verified via curl.
+- Backend: `_validate_push_files()` runs ast.parse on .py and json.loads on .json for every push; wired into BOTH `_make_self_update_proposal` and the `propose_github_push` handler — a push that would break the app is now REFUSED with a clear per-file message. Verified: catches unmatched ')' and bad JSON (prevents repeat of the login outage).
+- Frontend RightPanel Memory(): stats card (total/recalls/auto/manual), live search box, category filter chips with counts, per-memory category + source badges + recall-count, and editable 5-dot importance bars (optimistic update → PATCH). testids: memory-stats, memory-search, memory-cat-<c>, memory-importance, importance-dot-<n>.
+- Verified: server ast OK + boots clean; add/patch/stats/search endpoints 200; validator unit-tested; frontend compiles (1 pre-existing warning).
+- Deploy: FRONTEND changed → Save to GitHub → git fetch → git reset --hard origin/main → cd frontend → yarn.cmd build → restart backend.

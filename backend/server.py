@@ -979,6 +979,28 @@ def _make_push_proposal(repo_url, branch, message, files, create_branch, open_pr
             "files": clean, "create_branch": bool(create_branch), "open_pr": bool(open_pr)}
 
 
+def _validate_push_files(files):
+    """Block pushes that would break the app: .py must parse, .json must load.
+    Returns a list of human-readable problems (empty = OK). Prevents the kind of
+    syntax error that once took the backend down after a self-push."""
+    import ast
+    problems = []
+    for f in (files or []):
+        path = f.get("path", "")
+        content = f.get("content", "")
+        if path.endswith(".py"):
+            try:
+                ast.parse(content)
+            except SyntaxError as se:
+                problems.append(f"{path}: line {se.lineno}: {se.msg}")
+        elif path.endswith(".json"):
+            try:
+                json.loads(content)
+            except Exception as je:
+                problems.append(f"{path}: invalid JSON ({str(je)[:60]})")
+    return problems
+
+
 async def _make_self_update_proposal(user_id, paths, message, branch, open_pr):
     """Build a push proposal for Promethius's OWN source, reading file content
     from disk (no LLM inlining) so any file size works reliably."""
@@ -1008,6 +1030,10 @@ async def _make_self_update_proposal(user_id, paths, message, branch, open_pr):
         files.append({"path": rel, "content": content})
     if not files:
         return {"error": "No readable source files matched those paths."}
+    problems = _validate_push_files(files)
+    if problems:
+        return {"error": "Refusing to push — these files would break the app (fix them first):\n- "
+                + "\n- ".join(problems[:20])}
     open_pr = True if open_pr is None else bool(open_pr)
     branch = branch or "promethius-self-update"
     owner, repo = _parse_repo_url(self_repo)
@@ -1034,6 +1060,10 @@ async def _exec_gh_tool(name, args, user_id):
                                        args.get("files"), args.get("create_branch"), args.get("open_pr"))
             if not prop["files"]:
                 return {"error": "No files provided to push."}
+            problems = _validate_push_files(prop["files"])
+            if problems:
+                return {"error": "Refusing to push — these files would break the app:\n- "
+                        + "\n- ".join(problems[:20])}
             token = await _gh_token(user_id)
             prop["default_branch"] = await _repo_default_branch(token, prop["owner"], prop["repo"])
             await _remember_repo(user_id, prop["owner"], prop["repo"])
@@ -2097,6 +2127,30 @@ async def stats_memory(user=Depends(get_current_user)):
         except Exception as e:
             logger.error(f"memory stats failed: {e}")
     return {"total": len(mems), "by_category": {}, "by_source": {}, "total_recall": 0}
+
+
+class MemoryUpdateReq(BaseModel):
+    importance: Optional[int] = None
+    content: Optional[str] = None
+
+
+@api_router.patch("/memory/{mid}")
+async def update_memory(mid: str, req: MemoryUpdateReq, user=Depends(get_current_user)):
+    upd = {}
+    if req.importance is not None:
+        upd["importance"] = max(1, min(5, int(req.importance)))
+    if req.content is not None and req.content.strip():
+        upd["content"] = req.content.strip()[:300]
+        if _mem:
+            try:
+                upd["category"] = _mem.categorize(upd["content"])
+            except Exception:
+                pass
+    if not upd:
+        return {"ok": False, "detail": "nothing to update"}
+    await db.memories.update_one({"id": mid, "user_id": user["id"]}, {"$set": upd})
+    doc = await db.memories.find_one({"id": mid, "user_id": user["id"]}, {"_id": 0})
+    return doc or {"ok": True}
 
 
 @api_router.delete("/memory/{mid}")
