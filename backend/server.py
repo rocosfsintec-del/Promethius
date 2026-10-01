@@ -18,7 +18,7 @@ import hashlib as _hashlib_top
 import httpx
 import requests
 from cryptography.fernet import Fernet
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
 from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -1218,6 +1218,11 @@ GH_TOOL_GUIDANCE = (
     "files through propose_github_push by pasting their contents — that payload gets truncated and fails.\n"
     "Use propose_github_push only for writing NEW/small file content the user explicitly provided, to an "
     "EXTERNAL repo, and push ONE small file per call.\n"
+    "AUTO-FIX ON REJECTION: every push is syntax-checked server-side. If a push tool returns an error that "
+    "starts with 'Refusing to push', the response lists the exact file(s) and line(s) with bad syntax. You MUST "
+    "correct those file(s) and call the push tool again with the fixed content in the SAME turn — do not stop, "
+    "do not apologize and wait, and never tell the user it succeeded. Keep fixing and retrying (up to a few times) "
+    "until the push is accepted or you truly cannot resolve it, then explain what is wrong.\n"
     "IMPORTANT: Only call a push tool when the user's CURRENT message explicitly asks you to commit, "
     "push, save, apply, or write changes to a repo. For questions, reads, reviews, greetings, casual chat, or "
     "any message that does not clearly request a write, DO NOT call a push tool. Never re-propose a "
@@ -1679,6 +1684,33 @@ async def system_update(user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not launch updater: {str(e)[:150]}")
     return {"started": True, "note": "Promethius is updating and will restart. Reload once it is back."}
+
+
+@api_router.post("/system/restore")
+async def system_restore(request: Request):
+    """Roll back to the last commit that started cleanly. Intentionally NO login
+    (it's the recover-when-locked-out button), but hard-gated to the LOCAL machine:
+    only from a localhost request, on a Windows git clone, using the auto-recorded
+    good commit (can't run arbitrary code)."""
+    client_host = (request.client.host if request.client else "") or ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Restore can only be triggered from the local machine (open http://localhost:8001).")
+    if not (APP_ROOT / ".git").exists():
+        raise HTTPException(status_code=400, detail="Not a git clone — nothing to restore.")
+    restorer = APP_ROOT / "restore-promethius.bat"
+    good_file = APP_ROOT / "backend" / ".last_good_commit"
+    if os.name != "nt" or not restorer.is_file():
+        raise HTTPException(status_code=400, detail="Restore only runs on a local Windows install (restore-promethius.bat not found).")
+    if not good_file.is_file():
+        raise HTTPException(status_code=400, detail="No known-good version recorded yet.")
+    commit = good_file.read_text(encoding="utf-8").strip()
+    try:
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen(["cmd", "/c", "start", "", str(restorer)],
+                         cwd=str(APP_ROOT), creationflags=flags, close_fds=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not launch restore: {str(e)[:150]}")
+    return {"started": True, "commit": commit[:8], "note": "Restoring last good version and restarting. Reload once it is back."}
 
 
 # ---------------------------------------------------------------------------
@@ -2801,6 +2833,18 @@ async def startup():
         logger.info(f"Scheduler started with {len(jobs)} jobs")
     except Exception as e:
         logger.error(f"Scheduler init failed: {e}")
+    # Record the current commit as "last known good" — only reached once the app
+    # has started cleanly, so a broken commit never overwrites a working one.
+    try:
+        if (APP_ROOT / ".git").exists():
+            import subprocess as _sp
+            head = _sp.check_output(["git", "rev-parse", "HEAD"], cwd=str(APP_ROOT),
+                                    stderr=_sp.DEVNULL, timeout=10).decode().strip()
+            if head:
+                (APP_ROOT / "backend" / ".last_good_commit").write_text(head, encoding="utf-8")
+                logger.info(f"Recorded last-good commit {head[:8]}")
+    except Exception as e:
+        logger.info(f"Could not record last-good commit: {e}")
 
 
 @app.on_event("shutdown")

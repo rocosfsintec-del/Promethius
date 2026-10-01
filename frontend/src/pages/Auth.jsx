@@ -15,6 +15,21 @@ export default function Auth() {
   const [mode, setMode] = useState("login"); // login | register | recover
   const [code, setCode] = useState("");
   const [recoverStep, setRecoverStep] = useState("email");
+  const [restoring, setRestoring] = useState(false);
+
+  const restore = async () => {
+    if (restoring) return;
+    if (!window.confirm("Restore Promethius to the last version that started cleanly? It will rebuild and restart (~30–60s).")) return;
+    setRestoring(true);
+    try {
+      const r = await api.post("/system/restore");
+      toast.success(`Restoring to ${r.data?.commit || "last good"}… Promethius will restart. Reload this page in ~45s.`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Restore unavailable here.");
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   const supported = typeof window !== "undefined" && window.PublicKeyCredential;
 
@@ -204,6 +219,13 @@ export default function Auth() {
                 <p className="text-center mt-3">
                   <button data-testid="lost-devices-link" onClick={() => { setMode("recover"); setRecoverStep("email"); }} className="text-zinc-600 hover:text-zinc-400 text-xs font-mono uppercase tracking-wider">
                     Lost your devices?
+                  </button>
+                </p>
+              )}
+              {mode === "login" && (
+                <p className="text-center mt-2">
+                  <button data-testid="restore-last-good" onClick={restore} disabled={restoring} className="text-zinc-600 hover:text-orange-400 text-xs font-mono uppercase tracking-wider disabled:opacity-50">
+                    {restoring ? "Restoring…" : "Restore last good version"}
                   </button>
                 </p>
               )}

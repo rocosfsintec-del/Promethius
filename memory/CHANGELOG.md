@@ -104,3 +104,11 @@
 - Frontend RightPanel Memory(): stats card (total/recalls/auto/manual), live search box, category filter chips with counts, per-memory category + source badges + recall-count, and editable 5-dot importance bars (optimistic update → PATCH). testids: memory-stats, memory-search, memory-cat-<c>, memory-importance, importance-dot-<n>.
 - Verified: server ast OK + boots clean; add/patch/stats/search endpoints 200; validator unit-tested; frontend compiles (1 pre-existing warning).
 - Deploy: FRONTEND changed → Save to GitHub → git fetch → git reset --hard origin/main → cd frontend → yarn.cmd build → restart backend.
+
+## Login "Restore last good" + auto-fix-on-reject guidance (2026-10 — E1)
+- Backend records last-good commit (git HEAD) to backend/.last_good_commit at the END of a clean startup — a crashing commit never overwrites a working one.
+- New POST /api/system/restore: intentionally NO auth (recover-when-locked-out), hard-gated to localhost request + Windows git clone; reads .last_good_commit and launches restore-promethius.bat detached. Verified: 403 from proxy, passes guard from localhost. Added `Request` to fastapi import.
+- New restore-promethius.bat: self-relaunch from TEMP, GIT batch-mode env, reset --hard <last_good>, rebuild, restart (same hardening as updater).
+- Frontend Auth.jsx login screen: "Restore last good version" button (data-testid restore-last-good) with confirm → POST /system/restore → toast.
+- GH_TOOL_GUIDANCE: AUTO-FIX ON REJECTION — when a push returns 'Refusing to push' (syntax guard), the model must fix the listed file/line and re-call the push tool in the SAME turn, retrying until accepted; never claim success on a rejected push.
+- Deploy: FRONTEND changed → Save to GitHub → git reset --hard origin/main → yarn.cmd build → restart backend.
