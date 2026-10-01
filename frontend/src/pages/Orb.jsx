@@ -8,161 +8,182 @@ import VoiceSettings from "../components/VoiceSettings";
 import { createRollingRecorder } from "../lib/audio";
 import { DEFAULT_ORB, hexToRgb } from "../lib/orbConfig";
 
-// ---- Personal LLM plasma orb (ported from user's LLMOrb) -------------------
+// ---- Personal LLM plasma orb (WebGL, user's shader + live settings) --------
 function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, standbyRef) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    let raf;
-    let t = 0;
-    let smooth = 0;
-    let voiceSmooth = 0;
-    let flare = 0;
+    const gl =
+      canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false }) ||
+      canvas.getContext("experimental-webgl");
+    if (!gl) return;
 
-    const MAXF = 60;
-    const flames = Array.from({ length: MAXF }, () => ({
-      len: 0.72 + Math.random() * 0.18,
-      speed: 0.8 + Math.random() * 1.4,
-      phase: Math.random() * Math.PI * 2,
-      width: 8 + Math.random() * 10,
-    }));
+    const VS = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }`;
+    const FS = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime, uState, uEnergy, uVoice, uFlare;
+uniform float uHue, uTipHue, uSize, uDensity, uChaos, uGlow, uFloat, uStandby;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+float fbm(vec2 p){ float v=0.0, a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.07+11.3; a*=0.5; } return v; }
+vec3 hueRotate(vec3 c, float deg){
+  float a=radians(deg), s=sin(a), co=cos(a);
+  mat3 m = mat3(
+    0.299+0.701*co+0.168*s, 0.587-0.587*co+0.330*s, 0.114-0.114*co-0.497*s,
+    0.299-0.299*co-0.328*s, 0.587+0.413*co+0.035*s, 0.114-0.114*co+0.292*s,
+    0.299-0.300*co+1.250*s, 0.587-0.588*co-1.050*s, 0.114+0.886*co-0.203*s);
+  return clamp(m*c, 0.0, 1.0);
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / min(uRes.y, uRes.x);
+  float t = uTime;
+  float act = clamp(uEnergy + uVoice*1.4, 0.0, 1.6);
+  if (uStandby > 0.5) act = min(act, 0.1);
+  uv.y -= sin(t*(0.4 + uFloat*1.2)) * 0.02 * (0.5 + uFloat);
+  float chaos = 0.6 + uChaos;
+  float breath = 1.0 + (0.012 + act*0.03) * sin(t*(0.9 + uState*0.4 + act));
+  float R = clamp(uSize*2.0, 0.12, 0.42) * breath;
+  vec3 col = vec3(0.0);
+  float r = length(uv);
+  if (r < R - 0.001) {
+    float z = sqrt(max(0.0, R*R - r*r));
+    vec3 n = normalize(vec3(uv, z));
+    float lon = atan(n.x, n.z) + t*(0.08 + uState*0.1 + act*0.12);
+    float lat = asin(clamp(n.y,-1.0,1.0));
+    vec2 suv = vec2(lon*2.1, lat*3.1);
+    float v1 = fbm(suv*4.0 + vec2(t*0.12*chaos, -t*0.05));
+    float v2 = fbm(suv*8.0 - vec2(t*0.18*chaos, t*0.04));
+    float filaments = (smoothstep(0.52,0.78,v1)*0.7 + smoothstep(0.62,0.88,v2)*0.35) * (0.55 + 0.75*uDensity);
+    vec2 corePos = vec2(-0.025, 0.015);
+    float core = exp(-pow(length(uv-corePos)/0.055, 2.0)) * (1.0 + uFlare*0.5 + act*0.12);
+    float limb = smoothstep(0.15, 1.0, r/R);
+    float bright = uGlow * (0.8 + act*0.5 + uVoice*0.6);
+    vec3 deep = vec3(0.0,0.03,0.12);
+    vec3 body = vec3(0.0,0.12,0.42);
+    body = mix(body, deep, limb*0.65);
+    body += vec3(0.15,0.45,0.95) * filaments * (1.0-limb*0.35) * bright;
+    body += vec3(0.75,0.9,1.0) * core * (0.6 + uGlow*0.5);
+    body += vec3(0.2,0.45,0.9) * exp(-pow(r/(R*0.42),2.0)) * 0.25 * bright;
+    float edge = smoothstep(0.92,1.0, r/R);
+    body = mix(body, vec3(0.35,0.62,1.0), edge*0.55);
+    col = body;
+  }
+  float ang = atan(uv.y, uv.x);
+  float outside = r - R;
+  if (outside > 0.0 && outside < 0.14) {
+    float n1 = fbm(vec2(ang*4.0, t*(0.55 + uState*0.35 + act*0.4)*chaos));
+    float up = pow(max(sin(ang),0.0), 0.65);
+    float reach = (0.02 + pow(n1,1.6)*0.09*(0.6+uDensity)) * (0.35 + 0.65*up) * (1.0 + uFlare*0.6);
+    float f = smoothstep(reach, 0.0, outside);
+    f *= smoothstep(reach, reach*0.55, outside);
+    vec3 flame = mix(vec3(0.02,0.18,0.55), vec3(0.55,0.78,1.0), f);
+    flame = hueRotate(flame, uTipHue - uHue);
+    col += flame * f * 0.7 * uGlow;
+  }
+  col = hueRotate(col, uHue);
+  if (uStandby > 0.5) col *= 0.4;
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+    const compile = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+      }
+      return s;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const aLoc = gl.getAttribLocation(prog, "a");
+    gl.enableVertexAttribArray(aLoc);
+    gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+    const U = (n) => gl.getUniformLocation(prog, n);
+    const u = {
+      res: U("uRes"), time: U("uTime"), state: U("uState"), energy: U("uEnergy"),
+      voice: U("uVoice"), flare: U("uFlare"), hue: U("uHue"), tipHue: U("uTipHue"),
+      size: U("uSize"), density: U("uDensity"), chaos: U("uChaos"), glow: U("uGlow"),
+      float: U("uFloat"), standby: U("uStandby"),
+    };
 
     const hexToHue = (hex) => {
       const { r, g, b } = hexToRgb(hex);
-      const rn = r / 255, gn = g / 255, bn = b / 255;
-      const mx = Math.max(rn, gn, bn), mn = Math.min(rn, gn, bn), d = mx - mn;
+      const rn = r/255, gn = g/255, bn = b/255;
+      const mx = Math.max(rn,gn,bn), mn = Math.min(rn,gn,bn), d = mx-mn;
       let hh = 0;
       if (d) {
-        if (mx === rn) hh = ((gn - bn) / d) % 6;
-        else if (mx === gn) hh = (bn - rn) / d + 2;
-        else hh = (rn - gn) / d + 4;
-        hh *= 60;
-        if (hh < 0) hh += 360;
+        if (mx === rn) hh = ((gn-bn)/d) % 6;
+        else if (mx === gn) hh = (bn-rn)/d + 2;
+        else hh = (rn-gn)/d + 4;
+        hh *= 60; if (hh < 0) hh += 360;
       }
       return hh;
     };
+    const BASE_HUE = 210; // the shader's natural blue
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-      canvas.width = canvas.clientWidth * dpr;
-      canvas.height = canvas.clientHeight * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+      canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+      gl.viewport(0, 0, canvas.width, canvas.height);
     };
     resize();
     window.addEventListener("resize", resize);
 
-    const render = () => {
+    let raf, smooth = 0, voiceSmooth = 0, flare = 0;
+    const t0 = performance.now();
+    const render = (now) => {
       const cfg = configRef.current || DEFAULT_ORB;
-      t += 0.016;
-      smooth += (energyRef.current - smooth) * 0.08;
-      voiceSmooth += ((voiceRef ? voiceRef.current : 0) - voiceSmooth) * 0.4;
-      const vNow = voiceRef ? voiceRef.current : 0;
+      smooth += ((energyRef.current ?? 0.12) - smooth) * 0.08;
+      const vNow = voiceRef ? (voiceRef.current || 0) : 0;
+      voiceSmooth += (vNow - voiceSmooth) * 0.4;
       flare += (vNow - flare) * (vNow > flare ? 0.6 : 0.12);
 
-      const sb = standbyRef && standbyRef.current;
-      const w = canvas.clientWidth, h = canvas.clientHeight, cx = w / 2;
-      const cy = h / 2 + Math.sin(t * (sb ? 0.12 : 0.6)) * 16 * (cfg.floatSpeed * 2) * (sb ? 0.6 : 1);
-
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#000005";
-      ctx.fillRect(0, 0, w, h);
-
-      // Live activity drives the "state" params (idle -> thinking -> speaking).
-      let act = Math.min(smooth + voiceSmooth * 1.6, 1.3);
-      if (sb) act = Math.min(act, 0.12);
+      const sb = standbyRef && standbyRef.current ? 1 : 0;
+      let act = Math.min(smooth + voiceSmooth * 1.6, 1.6);
+      if (sb) act = Math.min(act, 0.1);
       const flashing = flashRef && flashRef.current > Date.now();
-      const hue = flashing ? 140 : hexToHue(cfg.color);
-      const lightMul = 0.55 + (cfg.lightning ?? 0.9) * 0.6;
-      const p = {
-        pulse: 0.035 + act * 0.12,
-        swirl: 1.1 + act * 2.6,
-        brightness: (1.0 + act * 0.5 + voiceSmooth * 0.6) * lightMul,
-        flicker: (0.8 + act * 1.8 + flare * 2.2) * (cfg.chaos ?? 1),
-        hue,
-      };
+      const targetHue = flashing ? 140 : hexToHue(cfg.color);
+      const tipHue = hexToHue(cfg.tipColor || "#e8eeff");
 
-      const breath = 1 + Math.sin(t * (act < 0.2 ? 1.2 : 3.4)) * p.pulse;
-      const base = Math.min(w, h) * (cfg.size ?? 0.16);
-      const radius = base * breath;
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+      gl.uniform1f(u.time, (now - t0) / 1000);
+      gl.uniform1f(u.state, Math.min(act, 2));
+      gl.uniform1f(u.energy, smooth);
+      gl.uniform1f(u.voice, voiceSmooth);
+      gl.uniform1f(u.flare, Math.min(flare, 1.2));
+      gl.uniform1f(u.hue, targetHue - BASE_HUE);
+      gl.uniform1f(u.tipHue, tipHue - BASE_HUE);
+      gl.uniform1f(u.size, Math.min(Math.max(cfg.size ?? 0.16, 0.08), 0.2));
+      gl.uniform1f(u.density, cfg.density ?? 1);
+      gl.uniform1f(u.chaos, cfg.chaos ?? 1);
+      gl.uniform1f(u.glow, 0.55 + (cfg.lightning ?? 0.5) * 0.9 + (flashing ? 0.3 : 0));
+      gl.uniform1f(u.float, cfg.floatSpeed ?? 0.5);
+      gl.uniform1f(u.standby, sb);
 
-      // outer glow
-      const glow = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 1.55);
-      glow.addColorStop(0, `hsla(${p.hue}, 100%, 70%, ${0.18 * p.brightness})`);
-      glow.addColorStop(0.45, `hsla(${p.hue}, 100%, 50%, 0.12)`);
-      glow.addColorStop(1, `hsla(${p.hue}, 100%, 40%, 0)`);
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 1.55, 0, Math.PI * 2);
-      ctx.fill();
-
-      // flames around the sphere
-      const nF = Math.max(10, Math.min(MAXF, Math.round(26 * (cfg.density ?? 1))));
-      const flareOut = flare * 0.5;
-      for (let i = 0; i < nF; i++) {
-        const f = flames[i];
-        const fa = (i / nF) * Math.PI * 2;
-        const flicker = 1 + Math.sin(t * f.speed * p.flicker + f.phase) * 0.18;
-        const a = fa + t * 0.15 * p.swirl * 0.15;
-        const inner = radius * 0.92;
-        const outer = radius * f.len * flicker * ((act < 0.2 ? 1.18 : 1.32) + flareOut);
-        const x1 = cx + Math.cos(a) * inner;
-        const y1 = cy + Math.sin(a) * inner;
-        const x2 = cx + Math.cos(a) * outer;
-        const y2 = cy + Math.sin(a) * outer - 10 * flicker;
-        const gg = ctx.createLinearGradient(x1, y1, x2, y2);
-        gg.addColorStop(0, `hsla(${p.hue}, 100%, 80%, 0)`);
-        gg.addColorStop(0.25, `hsla(${p.hue}, 100%, 72%, ${0.55 * p.brightness})`);
-        gg.addColorStop(1, `hsla(${p.hue + 10}, 100%, 85%, 0)`);
-        ctx.strokeStyle = gg;
-        ctx.lineWidth = f.width * (0.55 + 0.45 * flicker);
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        const midX = (x1 + x2) / 2 + Math.sin(t * 2 + i) * 8;
-        const midY = (y1 + y2) / 2 + Math.cos(t * 1.6 + i) * 6;
-        ctx.quadraticCurveTo(midX, midY, x2, y2);
-        ctx.stroke();
-      }
-
-      // glass / energy sphere
-      const sphere = ctx.createRadialGradient(cx - radius * 0.28, cy - radius * 0.32, radius * 0.08, cx, cy, radius);
-      sphere.addColorStop(0, `hsla(${p.hue}, 100%, 92%, 0.95)`);
-      sphere.addColorStop(0.18, `hsla(${p.hue}, 100%, 70%, 0.55)`);
-      sphere.addColorStop(0.45, `hsla(${p.hue}, 100%, 45%, 0.38)`);
-      sphere.addColorStop(0.78, `hsla(${p.hue + 8}, 100%, 28%, 0.55)`);
-      sphere.addColorStop(1, `hsla(${p.hue}, 100%, 60%, 0.85)`);
-      ctx.fillStyle = sphere;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // inner core
-      const corePulse = 1 + Math.sin(t * 5) * (act > 0.5 ? 0.18 : 0.06) + flare * 0.2;
-      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.42 * corePulse);
-      core.addColorStop(0, "rgba(255,255,255,0.95)");
-      core.addColorStop(0.25, `hsla(${p.hue}, 100%, 85%, 0.7)`);
-      core.addColorStop(1, "rgba(0,80,180,0)");
-      ctx.fillStyle = core;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 0.42 * corePulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      // rim
-      ctx.strokeStyle = `hsla(${p.hue}, 100%, 80%, 0.55)`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.stroke();
-
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       raf = requestAnimationFrame(render);
     };
-    render();
+    raf = requestAnimationFrame(render);
+
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      try { gl.deleteProgram(prog); gl.deleteBuffer(buf); } catch (e) {}
     };
-  }, [canvasRef, energyRef, configRef]);
+  }, [canvasRef, energyRef, configRef, voiceRef, flashRef, standbyRef]);
 }
 
 function energyFor(m, c) {

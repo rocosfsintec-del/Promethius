@@ -83,3 +83,10 @@
 - FIX (frontend Sidebar.jsx): rewrote UpdateButton — admin-only (gated with user.role==='admin'), uses the api axios instance (correct auth), states idle→starting(spinner)→restarting(green "Reload", click reloads page)→error. No SSE stream (incompatible with self-restart). Kept in the tools grid per user. testid: update-promethius-button.
 - User choices: admin-only; manual click-to-reload (no auto-reload); icon stays in tools grid.
 - NOTE: this is a FRONTEND change, so deploy needs yarn build this round (unlike fix A). Windows launch not testable from Linux preview; endpoint guards + compile verified.
+
+## Orb replaced with user's WebGL plasma shader (2026-10 — E1)
+- Replaced the 2D-canvas orb renderer in Orb.jsx useOrbCanvas with the user's WebGL plasma-sphere fragment shader (filaments via fbm, bright core, limb shading, outer flame band). Kept the same hook signature so the rest of Orb.jsx (voice/state/flash/standby refs) is unchanged.
+- Made ALL orb settings functional by binding them to shader uniforms: color->uHue (hueRotate from base blue 210deg), tipColor->uTipHue (outer flames), size->uSize(R), density->uDensity, chaos->uChaos (turbulence/speed), lightning->uGlow (brightness), floatSpeed->uFloat (bob), idle->resting uEnergy. Live: energyRef->uEnergy, voiceRef->uVoice+uFlare, state activity->uState, flash->green hue+glow boost, standby->dim. Moods are presets of these.
+- Verified: standalone WebGL test page (public/orbtest.html, since removed) rendered with zero shader/link errors; hue rotation + filaments + core + flame band all correct. Frontend compiles (1 pre-existing warning).
+- Source of truth is now /app Orb.jsx so Save-to-GitHub preserves it (won't be overwritten again).
+- DEPLOY: frontend change -> needs yarn build.
