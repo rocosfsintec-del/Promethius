@@ -1,0 +1,118 @@
+import { useState } from "react";
+import { Flame, Plus, Trash2, Brain, Library, FolderKanban, BookOpen, Clapperboard, Wrench, Clock, LogOut, Shield, Settings as SettingsIcon } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import VoiceSettings from "./VoiceSettings";
+
+const TOOLS = [
+  { id: "memory", label: "Memory", icon: Brain },
+  { id: "vault", label: "Vault", icon: Library },
+  { id: "projects", label: "Projects", icon: FolderKanban },
+  { id: "journal", label: "Journal", icon: BookOpen },
+  { id: "studio", label: "Studio", icon: Clapperboard },
+  { id: "tools", label: "Tools", icon: Wrench },
+  { id: "schedule", label: "Auto", icon: Clock },
+];
+
+export default function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, activeTool, setActiveTool }) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [showSettings, setShowSettings] = useState(false);
+
+  return (
+    <div className="w-72 border-r border-white/5 bg-[#09090b] flex flex-col h-full shrink-0">
+      <button
+        data-testid="back-to-orb-button"
+        onClick={() => navigate("/")}
+        className="p-4 flex items-center gap-2.5 hover:bg-white/5 transition-colors"
+        title="Return to the Orb"
+      >
+        <Flame className="text-orange-500" size={24} strokeWidth={1.5} />
+        <span className="font-heading text-xl font-bold tracking-tight">Promethius</span>
+      </button>
+
+      <div className="px-3">
+        <button
+          data-testid="new-chat-button"
+          onClick={onNew}
+          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium transition-colors"
+        >
+          <Plus size={16} strokeWidth={2} /> New chat
+        </button>
+      </div>
+
+      <div className="px-3 mt-5 grid grid-cols-4 gap-1">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            data-testid={`tool-${t.id}`}
+            onClick={() => setActiveTool(activeTool === t.id ? null : t.id)}
+            title={t.label}
+            className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-colors ${
+              activeTool === t.id ? "bg-orange-500/10 text-orange-400" : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
+            }`}
+          >
+            <t.icon size={17} strokeWidth={1.5} />
+            <span className="text-[9px] font-mono uppercase tracking-wide">{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="px-3 mt-5 mb-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-600">Conversations</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+        {conversations.length === 0 && (
+          <p className="text-zinc-600 text-xs px-2 py-3">No conversations yet.</p>
+        )}
+        {conversations.map((c) => (
+          <div
+            key={c.id}
+            data-testid={`conversation-${c.id}`}
+            onClick={() => onSelect(c.id)}
+            className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+              currentId === c.id ? "bg-white/5 text-zinc-100" : "text-zinc-400 hover:bg-white/5"
+            }`}
+          >
+            <span className="flex-1 truncate text-sm">{c.title}</span>
+            <button
+              data-testid={`delete-conversation-${c.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(c.id);
+              }}
+              className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-3 border-t border-white/5">
+        <div className="flex items-center gap-2 px-2 py-2">
+          <div className="w-8 h-8 rounded-full bg-orange-500/15 border border-orange-500/20 flex items-center justify-center text-orange-400 text-sm font-semibold">
+            {user?.name?.[0]?.toUpperCase() || "U"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-zinc-200 truncate">{user?.name}</p>
+            <p className="text-[10px] text-zinc-600 font-mono uppercase">{user?.role}</p>
+          </div>
+          {user?.role === "admin" && (
+            <button data-testid="admin-link" onClick={() => navigate("/admin")} className="text-zinc-500 hover:text-orange-400 transition-colors" title="Admin">
+              <Shield size={16} strokeWidth={1.5} />
+            </button>
+          )}
+          <button data-testid="settings-link" onClick={() => setShowSettings(true)} className="text-zinc-500 hover:text-orange-400 transition-colors" title="Voice settings">
+            <SettingsIcon size={16} strokeWidth={1.5} />
+          </button>
+          <button data-testid="logout-button" onClick={logout} className="text-zinc-500 hover:text-red-400 transition-colors" title="Logout">
+            <LogOut size={16} strokeWidth={1.5} />
+          </button>
+        </div>
+      </div>
+      {showSettings && <VoiceSettings onClose={() => setShowSettings(false)} />}
+    </div>
+  );
+}
