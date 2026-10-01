@@ -88,8 +88,11 @@ git clean -fd >> "%LOG%" 2>&1
 echo.
 echo [5/6] Updating dependencies and rebuilding UI...
 cd /d "%ROOT%backend"
-if exist "venv\Scripts\activate.bat" call venv\Scripts\activate.bat
-pip install -q -r requirements.txt >> "%LOG%" 2>&1
+if exist "venv\Scripts\python.exe" (
+    venv\Scripts\python.exe -m pip install -q -r requirements.txt >> "%LOG%" 2>&1
+) else (
+    pip install -q -r requirements.txt >> "%LOG%" 2>&1
+)
 cd /d "%ROOT%frontend"
 call yarn install >> "%LOG%" 2>&1
 call yarn build >> "%LOG%" 2>&1
@@ -108,3 +111,5 @@ echo   ^(Full details saved to update-log.txt^)
 echo ============================================
 timeout /t 4 >nul
 endlocal
+REM Close this updater window automatically when finished.
+exit
