@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Send, Mic, Square, Paperclip, Globe, Image as ImageIcon, Loader2,
-  Flame, X, FileText, Github, RefreshCw,
+  Flame, X, FileText, Github, RefreshCw, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -136,6 +136,32 @@ export default function ChatPanel({
   const chunksRef = useRef([]);
   const [keyStatus, setKeyStatus] = useState(null);
 
+  // Running spend meter for this browser session (survives conversation switches).
+  const SPEND_KEY = "promethius_session_spend";
+  const [spend, setSpend] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(SPEND_KEY)) || { universal: 0, total: 0, n: 0 }; }
+    catch { return { universal: 0, total: 0, n: 0 }; }
+  });
+  const bumpSpend = (p, m, inText, outText) => {
+    const cost = liveMsgCost(p, m, inText, outText) || 0;
+    if (!cost) return;
+    const toUniversal = billingOf(p, keyStatus) === "universal";
+    setSpend((s) => {
+      const next = {
+        universal: s.universal + (toUniversal ? cost : 0),
+        total: s.total + cost,
+        n: s.n + 1,
+      };
+      try { sessionStorage.setItem(SPEND_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const resetSpend = () => {
+    const zero = { universal: 0, total: 0, n: 0 };
+    setSpend(zero);
+    try { sessionStorage.setItem(SPEND_KEY, JSON.stringify(zero)); } catch {}
+  };
+
   useEffect(() => {
     api.get("/settings/keys").then((r) => setKeyStatus(r.data)).catch(() => {});
   }, []);
@@ -217,6 +243,7 @@ export default function ChatPanel({
         refreshConversations();
       }
       setMessages((m) => [...m, { id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text", pushProposal: r.data.push_proposal || null }]);
+      bumpSpend(provider, model, text, r.data.reply);
       if (r.data.push_proposal) {
         toast.info("Promethius prepared a change — tap “Review & Push” to approve");
       }
@@ -273,15 +300,6 @@ export default function ChatPanel({
   };
 
   const flat = Object.entries(providers || {}).flatMap(([p, ms]) => ms.map((m) => ({ p, m })));
-
-  // Running cost estimate for the whole conversation (current model rates).
-  const sessionCost = messages.reduce((sum, m, idx) => {
-    if (m.role !== "assistant" || m.type === "image") return sum;
-    const prev = idx > 0 && messages[idx - 1]?.role === "user" ? messages[idx - 1].content : "";
-    const c = liveMsgCost(provider, model, prev, m.content);
-    return sum + (c || 0);
-  }, 0);
-  const sessionFree = provider === "ollama" || costOf(provider, model) === "free";
 
   return (
     <div className="flex-1 flex flex-col h-full relative">
@@ -418,16 +436,23 @@ export default function ChatPanel({
             </div>
           )}
         </div>
-        {messages.length > 0 && (
+        {spend.n > 0 && (
           <div
-            data-testid="session-cost"
-            title="Estimated total cost for this conversation at current model rates"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#121214] border border-white/10 text-xs font-mono text-zinc-400"
+            data-testid="session-spend-meter"
+            title={`Universal Key spend this session: ${fmtCost(spend.universal)} across ${spend.n} message${spend.n === 1 ? "" : "s"}.\nTotal session spend (all keys): ${fmtCost(spend.total)}.\nClick to reset.`}
+            onClick={resetSpend}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#121214] border border-white/10 text-xs font-mono text-zinc-400 cursor-pointer hover:border-orange-500/40 transition-colors"
           >
-            <span className="text-zinc-500">Session</span>
-            <span className={sessionFree ? "text-emerald-400" : COST_STYLES[costOf(provider, model)].text}>
-              {sessionFree ? "Free" : fmtCost(sessionCost)}
+            <Zap size={12} className="text-orange-400" strokeWidth={2} />
+            <span className="text-zinc-500">Universal Key</span>
+            <span data-testid="session-spend-universal" className="text-orange-300">
+              {fmtCost(spend.universal) || "$0"}
             </span>
+            {spend.total > spend.universal + 1e-9 && (
+              <span className="text-zinc-600" title="Total across all keys (incl. your own)">
+                / {fmtCost(spend.total)} total
+              </span>
+            )}
           </div>
         )}
       </div>

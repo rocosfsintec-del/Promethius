@@ -123,3 +123,14 @@ User asked to pull the repo into a fresh workspace and repair it.
   Fetches /api/settings/keys on mount (universal_key.set, openai.set, anthropic.set).
 - Added a two-chip legend in the dropdown footer. Verified live via passkey UI: all cloud
   models show orange "Universal", Ollama shows green "Local".
+
+## Session Spend Meter (2026-06)
+- ChatPanel header now shows a live "Universal Key" spend meter (⚡ icon) that accumulates
+  the actual per-reply cost as you chat. Tracks {universal, total, n} in sessionStorage
+  (survives conversation switches, resets per browser tab session). Click to reset.
+- bumpSpend(provider, model, inText, outText) runs after each reply; adds cost to the
+  universal bucket only when billingOf()==="universal", always to total. Tooltip shows
+  Universal spend, total (all keys), and message count.
+- Replaced the old per-conversation "session-cost" estimate (which recomputed all history
+  at the current model rate) with this accurate accumulating meter. testid: session-spend-meter.
+- Verified live via passkey UI: sent a message, meter appeared with Universal Key spend.
