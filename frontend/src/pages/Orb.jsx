@@ -65,10 +65,10 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       const cy = h / 2 + Math.sin(t * (sb ? 0.12 : 0.6)) * 16 * (cfg.floatSpeed * 2) * (sb ? 0.6 : 1);
 
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#000005";
+      // Pure black background — orb is the only light source
+      ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, w, h);
 
-      // Live activity drives the "state" params (idle -> thinking -> speaking).
       let act = Math.min(smooth + voiceSmooth * 1.6, 1.3);
       if (sb) act = Math.min(act, 0.12);
       const flashing = flashRef && flashRef.current > Date.now();
@@ -86,74 +86,168 @@ function useOrbCanvas(canvasRef, energyRef, configRef, voiceRef, flashRef, stand
       const base = Math.min(w, h) * (cfg.size ?? 0.16);
       const radius = base * breath;
 
-      // outer glow
-      const glow = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 1.55);
-      glow.addColorStop(0, `hsla(${p.hue}, 100%, 70%, ${0.18 * p.brightness})`);
-      glow.addColorStop(0.45, `hsla(${p.hue}, 100%, 50%, 0.12)`);
-      glow.addColorStop(1, `hsla(${p.hue}, 100%, 40%, 0)`);
-      ctx.fillStyle = glow;
+      // ── DEEP OUTER HALO ──────────────────────────────────────────────
+      const deepGlow = ctx.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius * 2.8);
+      deepGlow.addColorStop(0, `hsla(${hue}, 100%, 70%, ${0.12 * p.brightness})`);
+      deepGlow.addColorStop(0.4, `hsla(${hue}, 100%, 55%, 0.06)`);
+      deepGlow.addColorStop(1, `hsla(${hue}, 100%, 40%, 0)`);
+      ctx.fillStyle = deepGlow;
       ctx.beginPath();
-      ctx.arc(cx, cy, radius * 1.55, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius * 2.8, 0, Math.PI * 2);
       ctx.fill();
 
-      // flames around the sphere
+      // ── ROTATING ENERGY BANDS (plasma turbulence) ────────────────────
+      const bands = 5;
+      for (let b = 0; b < bands; b++) {
+        const bAngle = (b / bands) * Math.PI * 2 + t * 0.18 * (b % 2 === 0 ? 1 : -1);
+        const bRadius = radius * (0.55 + b * 0.09);
+        const bAlpha = (0.06 + act * 0.08) * p.brightness * (1 - b * 0.12);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(bAngle);
+        const bandGrad = ctx.createLinearGradient(-bRadius, 0, bRadius, 0);
+        bandGrad.addColorStop(0, `hsla(${hue + b * 8}, 100%, 75%, 0)`);
+        bandGrad.addColorStop(0.5, `hsla(${hue + b * 8}, 100%, 80%, ${bAlpha})`);
+        bandGrad.addColorStop(1, `hsla(${hue + b * 8}, 100%, 75%, 0)`);
+        ctx.strokeStyle = bandGrad;
+        ctx.lineWidth = 2 + b * 0.8;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, bRadius, bRadius * (0.3 + b * 0.05), 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // ── ELECTRIC ARC TRACES (lightning lattice) ───────────────────────
+      const arcCount = Math.round(4 + act * 8 + flare * 6);
+      const drawArc = (x1, y1, depth, energy) => {
+        if (depth === 0 || energy < 0.015) return;
+        const angle = Math.atan2(y1 - cy, x1 - cx) + (Math.random() - 0.5) * 1.2;
+        const len = (radius * 0.25 + Math.random() * radius * 0.35) * energy;
+        const x2 = x1 + Math.cos(angle) * len;
+        const y2 = y1 + Math.sin(angle) * len;
+        const dx2 = x2 - cx, dy2 = y2 - cy;
+        const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        const clampR = Math.min(dist2, radius * 1.05);
+        const cx2 = cx + (dx2 / dist2) * clampR;
+        const cy2 = cy + (dy2 / dist2) * clampR;
+        const alpha = 0.35 + act * 0.45 + Math.random() * 0.2;
+        ctx.strokeStyle = `hsla(${hue}, 100%, 92%, ${alpha})`;
+        ctx.lineWidth = 0.5 + depth * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+        if (Math.random() > 0.45) drawArc(cx2, cy2, depth - 1, energy * 0.6);
+      };
+
+      const arcSeed = act > 0.1 || flare > 0.05;
+      if (arcSeed) {
+        for (let a = 0; a < arcCount; a++) {
+          const seedAngle = Math.random() * Math.PI * 2;
+          const seedR = radius * (0.25 + Math.random() * 0.55);
+          const sx = cx + Math.cos(seedAngle) * seedR;
+          const sy = cy + Math.sin(seedAngle) * seedR;
+          drawArc(sx, sy, 3, 0.6 + act * 0.8 + flare);
+        }
+      }
+
+      // ── FIRE TENDRILS (rising from top, concentrated) ─────────────────
       const nF = Math.max(10, Math.min(MAXF, Math.round(26 * (cfg.density ?? 1))));
       const flareOut = flare * 0.5;
       for (let i = 0; i < nF; i++) {
         const f = flames[i];
-        const fa = (i / nF) * Math.PI * 2;
-        const flicker = 1 + Math.sin(t * f.speed * p.flicker + f.phase) * 0.18;
-        const a = fa + t * 0.15 * p.swirl * 0.15;
-        const inner = radius * 0.92;
-        const outer = radius * f.len * flicker * ((act < 0.2 ? 1.18 : 1.32) + flareOut);
+        const spread = 1.22;
+        const fa = (Math.PI * 1.5 - spread) + (i / nF) * spread * 2;
+        const flicker = 1 + Math.sin(t * f.speed * p.flicker + f.phase) * 0.22;
+        const a = fa + Math.sin(t * 0.8 + i * 0.4) * 0.12;
+        const inner = radius * 0.88;
+        const outer = radius * f.len * flicker * ((act < 0.2 ? 1.3 : 1.65) + flareOut);
         const x1 = cx + Math.cos(a) * inner;
         const y1 = cy + Math.sin(a) * inner;
         const x2 = cx + Math.cos(a) * outer;
-        const y2 = cy + Math.sin(a) * outer - 10 * flicker;
+        const y2 = cy + Math.sin(a) * outer - 22 * flicker;
         const gg = ctx.createLinearGradient(x1, y1, x2, y2);
-        gg.addColorStop(0, `hsla(${p.hue}, 100%, 80%, 0)`);
-        gg.addColorStop(0.25, `hsla(${p.hue}, 100%, 72%, ${0.55 * p.brightness})`);
-        gg.addColorStop(1, `hsla(${p.hue + 10}, 100%, 85%, 0)`);
+        gg.addColorStop(0, `hsla(${hue}, 100%, 85%, 0)`);
+        gg.addColorStop(0.2, `hsla(${hue}, 100%, 75%, ${0.65 * p.brightness})`);
+        gg.addColorStop(0.7, `hsla(${hue + 15}, 100%, 88%, ${0.35 * p.brightness})`);
+        gg.addColorStop(1, `hsla(${hue + 20}, 100%, 95%, 0)`);
         ctx.strokeStyle = gg;
-        ctx.lineWidth = f.width * (0.55 + 0.45 * flicker);
+        ctx.lineWidth = f.width * (0.5 + 0.5 * flicker);
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(x1, y1);
-        const midX = (x1 + x2) / 2 + Math.sin(t * 2 + i) * 8;
-        const midY = (y1 + y2) / 2 + Math.cos(t * 1.6 + i) * 6;
+        const midX = (x1 + x2) / 2 + Math.sin(t * 2.2 + i) * 10;
+        const midY = (y1 + y2) / 2 + Math.cos(t * 1.8 + i) * 7;
         ctx.quadraticCurveTo(midX, midY, x2, y2);
         ctx.stroke();
       }
 
-      // glass / energy sphere
-      const sphere = ctx.createRadialGradient(cx - radius * 0.28, cy - radius * 0.32, radius * 0.08, cx, cy, radius);
-      sphere.addColorStop(0, `hsla(${p.hue}, 100%, 92%, 0.95)`);
-      sphere.addColorStop(0.18, `hsla(${p.hue}, 100%, 70%, 0.55)`);
-      sphere.addColorStop(0.45, `hsla(${p.hue}, 100%, 45%, 0.38)`);
-      sphere.addColorStop(0.78, `hsla(${p.hue + 8}, 100%, 28%, 0.55)`);
-      sphere.addColorStop(1, `hsla(${p.hue}, 100%, 60%, 0.85)`);
+      // ── PLASMA SPHERE BODY ───────────────────────────────────────────
+      const sphere = ctx.createRadialGradient(cx - radius * 0.28, cy - radius * 0.32, radius * 0.05, cx, cy, radius);
+      sphere.addColorStop(0, `hsla(${hue}, 60%, 98%, 0.98)`);
+      sphere.addColorStop(0.12, `hsla(${hue}, 90%, 80%, 0.75)`);
+      sphere.addColorStop(0.38, `hsla(${hue}, 100%, 55%, 0.5)`);
+      sphere.addColorStop(0.68, `hsla(${hue + 10}, 100%, 32%, 0.6)`);
+      sphere.addColorStop(0.88, `hsla(${hue}, 100%, 18%, 0.7)`);
+      sphere.addColorStop(1, `hsla(${hue}, 100%, 65%, 0.9)`);
       ctx.fillStyle = sphere;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fill();
 
-      // inner core
-      const corePulse = 1 + Math.sin(t * 5) * (act > 0.5 ? 0.18 : 0.06) + flare * 0.2;
-      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.42 * corePulse);
-      core.addColorStop(0, "rgba(255,255,255,0.95)");
-      core.addColorStop(0.25, `hsla(${p.hue}, 100%, 85%, 0.7)`);
-      core.addColorStop(1, "rgba(0,80,180,0)");
-      ctx.fillStyle = core;
+      // ── INNER PLASMA TURBULENCE OVERLAY ──────────────────────────────
+      const noiseLayers = 3;
+      for (let nl = 0; nl < noiseLayers; nl++) {
+        const nAngle = t * (0.4 + nl * 0.25) * (nl % 2 === 0 ? 1 : -1);
+        const nR = radius * (0.35 + nl * 0.18);
+        const nAlpha = (0.06 + act * 0.07) * p.brightness;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(nAngle);
+        const noiseGrad = ctx.createRadialGradient(nR * 0.3, -nR * 0.2, 0, 0, 0, nR);
+        noiseGrad.addColorStop(0, `hsla(${hue + nl * 15}, 100%, 90%, ${nAlpha})`);
+        noiseGrad.addColorStop(1, `hsla(${hue + nl * 15}, 100%, 60%, 0)`);
+        ctx.fillStyle = noiseGrad;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, nR, nR * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // ── WHITE-HOT CORE ───────────────────────────────────────────────
+      const corePulse = 1 + Math.sin(t * 5.5) * (act > 0.5 ? 0.22 : 0.07) + flare * 0.25;
+      // Outer bloom ring
+      const coreBloom = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.55 * corePulse);
+      coreBloom.addColorStop(0, "rgba(255,255,255,0.0)");
+      coreBloom.addColorStop(0.55, `hsla(${hue}, 100%, 75%, ${0.18 * p.brightness})`);
+      coreBloom.addColorStop(0.75, `hsla(${hue}, 100%, 60%, ${0.10 * p.brightness})`);
+      coreBloom.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = coreBloom;
       ctx.beginPath();
-      ctx.arc(cx, cy, radius * 0.42 * corePulse, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius * 0.55 * corePulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // rim
-      ctx.strokeStyle = `hsla(${p.hue}, 100%, 80%, 0.55)`;
-      ctx.lineWidth = 2;
+      // Inner blinding core
+      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.3 * corePulse);
+      core.addColorStop(0, "rgba(255,255,255,1.0)");
+      core.addColorStop(0.15, "rgba(235,248,255,0.95)");
+      core.addColorStop(0.45, `hsla(${hue}, 100%, 88%, 0.6)`);
+      core.addColorStop(0.8, `hsla(${hue}, 100%, 70%, 0.2)`);
+      core.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.3 * corePulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      // ── BRIGHT CYAN RIM RING ─────────────────────────────────────────
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = `hsla(${hue}, 100%, 75%, 0.9)`;
+      ctx.strokeStyle = `hsla(${hue}, 100%, 85%, 0.75)`;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.shadowBlur = 0;
 
       raf = requestAnimationFrame(render);
     };
@@ -263,7 +357,6 @@ export default function Orb() {
       });
       return true;
     } catch (e) {
-      // Voice (ElevenLabs) failed — surface the text so the user still gets the reply
       const detail = e?.response?.status === 503 || e?.response?.status === 401
         ? "Voice is unavailable (check your ElevenLabs API key)."
         : "Voice playback failed.";
@@ -354,227 +447,165 @@ export default function Orb() {
     try {
       if (rollingRef.current) {
         const wav = rollingRef.current.snapshot();
-        const fd = new FormData();
-        fd.append("file", wav, "utt.wav");
-        const r = await api.post("/speakers/identify", fd);
-        speaker = r.data.speaker || null;
+        if (wav) {
+          const fd = new FormData();
+          fd.append("file", wav, "voice.wav");
+          const res = await api.post("/speakers/identify", fd);
+          if (res.data?.name) speaker = res.data.name;
+        }
       }
-    } catch (e) {}
+    } catch (e) { /* identification optional */ }
     ask(query, speaker);
   }, [ask]);
 
-  const isOpenChatCommand = (text) =>
-    /(open|show|go to|enter|switch to|take me to).*(prompt|chat|forge|text|keyboard)/.test(text) ||
-    /prompt window|text mode|the forge/.test(text);
+  // ── SPEECH RECOGNITION ────────────────────────────────────────────────────
+  const pauseListening = useCallback(() => {
+    if (recogRef.current) { try { recogRef.current.stop(); } catch (e) {} }
+  }, []);
 
-  const titleCase = (s) => s.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+  const resumeListening = useCallback(() => {
+    armedRef.current = true;
+    setMode("listening", "Listening — just speak to Promethius");
+    if (recogRef.current) { try { recogRef.current.start(); } catch (e) {} }
+  }, [setMode]);
 
-  const interpret = useCallback((q) => {
-    const ql = q.trim().toLowerCase();
-    let m;
-    if ((m = ql.match(/^this is ([a-z][a-z'’\- ]{1,30})/))) { enroll(titleCase(m[1])); return; }
-    if ((m = ql.match(/^(?:forget|remove|delete|erase) ([a-z][a-z'’\- ]{1,30})/))) { forget(titleCase(m[1])); return; }
-    identifyThenAsk(q.trim());
-  }, [enroll, forget, identifyThenAsk]);
-
-  const handleFinal = useCallback((raw) => {
-    const text = raw.trim().toLowerCase();
-    if (!text || text.length < 2 || busyRef.current) return;
-
-    // Standby mode: ignore everything until the name "Promethius" is spoken.
-    if (standbyRef.current) {
-      if (/prom[ae]th[a-z]*/.test(text)) {
-        standbyRef.current = false;
-        pauseListening();
-        setMode("listening", "I'm here.");
-        speak("I'm here.").finally(() => resumeListening());
-      }
-      return;
-    }
-
-    // "Promethius, standby" (or just "standby") -> enter standby.
-    if (/\bstand\s?by\b/.test(text)) {
-      standbyRef.current = true;
-      pauseListening();
-      setMode("idle", "");
-      speak("Standing by.").finally(() => resumeListening());
-      return;
-    }
-
-    // A pending introduction: the next thing this person says commits their voiceprint.
-    if (pendingEnrollRef.current) {
-      const name = pendingEnrollRef.current;
-      pendingEnrollRef.current = null;
-      commitEnrollment(name, raw.trim());
-      return;
-    }
-    if (isOpenChatCommand(text)) {
-      setMode("thinking", "Opening the prompt...");
-      setTimeout(() => navigate("/chat"), 400);
-      return;
-    }
-    // No wake word needed — every spoken phrase is treated as a request.
-    interpret(raw.trim());
-  }, [interpret, navigate, setMode, speak, commitEnrollment]);
-
-  const pauseListening = () => {
-    try { recogRef.current && recogRef.current.stop(); } catch (e) {}
-  };
-  const resumeListening = () => {
-    if (!supportsSR) { setMode("idle", "Tap the orb to speak"); return; }
-    setMode("idle", standbyRef.current ? "" : "Listening — just speak");
-    try { recogRef.current && recogRef.current.start(); } catch (e) {}
-  };
-
-  const startWakeWord = useCallback(() => {
+  useEffect(() => {
+    if (!supportsSR) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recog = new SR();
-    recog.continuous = true;
-    recog.interimResults = true;
     recog.lang = "en-US";
-    recog.onresult = (ev) => {
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) handleFinal(ev.results[i][0].transcript);
-      }
-    };
-    recog.onend = () => {
-      if (!busyRef.current) {
-        try { recog.start(); } catch (e) {}
-      }
-    };
-    recog.onerror = () => {};
+    recog.continuous = true;
+    recog.interimResults = false;
     recogRef.current = recog;
-    try { recog.start(); } catch (e) {}
-    setMode("idle", "Listening — just speak");
-  }, [handleFinal, setMode]);
 
-  // Fallback: push-to-talk via MediaRecorder when SpeechRecognition is unavailable
-  const togglePushToTalk = async () => {
-    if (busyRef.current) return;
-    if (mediaRecRef.current && mediaRecRef.current.state === "recording") {
-      mediaRecRef.current.stop();
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
-      mr.onstop = async () => {
-        stream.getTracks().forEach((tk) => tk.stop());
-        setMode("thinking", "Transcribing...");
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const fd = new FormData();
-        fd.append("file", blob, "audio.webm");
-        try {
-          const r = await api.post("/voice/transcribe", fd);
-          if (r.data.text?.trim()) ask(r.data.text.trim());
-          else setMode("idle", "Tap the orb to speak");
-        } catch { setMode("idle", "Tap the orb to speak"); }
-      };
-      mr.start();
-      mediaRecRef.current = mr;
-      setMode("listening", "Listening... tap again to send");
-    } catch {
-      toast.error("Microphone access denied");
-    }
-  };
+    recog.onresult = (e) => {
+      if (!armedRef.current || busyRef.current) return;
+      const transcript = Array.from(e.results)
+        .slice(e.resultIndex)
+        .filter((r) => r.isFinal)
+        .map((r) => r[0].transcript.trim())
+        .join(" ");
+      if (!transcript) return;
 
-  const awaken = async () => {
-    if (state !== "dormant") {
-      if (!supportsSR) togglePushToTalk();
-      return;
-    }
-    try {
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      await audioCtxRef.current.resume();
-    } catch (e) {}
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      if (audioCtxRef.current) rollingRef.current = createRollingRecorder(stream, audioCtxRef.current, 5);
-    } catch (e) {}
-    if (supportsSR) {
-      startWakeWord();
-      toast.success("Promethius is listening. Just speak.");
-    } else {
-      setMode("idle", "Tap the orb to speak (voice needs Chrome)");
-      toast.info("Continuous voice needs Chrome. Tap the orb to talk.");
-    }
-  };
+      const lower = transcript.toLowerCase();
 
-  // Start listening automatically on load — no tap, no wake word.
-  const startedRef = useRef(false);
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    awaken();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Keep the screen awake so the orb stays on and the device won't sleep
-  // while Promethius is up (including standby). Re-acquires when tab regains focus.
-  useEffect(() => {
-    let lock = null;
-    const acquire = async () => {
-      try {
-        if ("wakeLock" in navigator && document.visibilityState === "visible") {
-          lock = await navigator.wakeLock.request("screen");
+      // ── WAKE WORD ──
+      const wakeWords = ["promethius", "prometheus", "hey promethius", "hey prometheus"];
+      if (wakeWords.some((w) => lower.includes(w))) {
+        if (!standbyRef.current) {
+          standbyRef.current = true;
+          setMode("idle", "Promethius active");
+          return;
         }
-      } catch (e) { /* wake lock unavailable */ }
+      }
+
+      if (!standbyRef.current) return;
+
+      // ── ENROLLMENT COMMANDS ──
+      const enrollMatch = lower.match(/(?:my name is|i(?:'m| am)|call me)\s+([a-z]+)/i);
+      if (enrollMatch && !pendingEnrollRef.current) {
+        enroll(enrollMatch[1]);
+        return;
+      }
+
+      // ── FORGET COMMAND ──
+      const forgetMatch = lower.match(/forget\s+([a-z]+)/i);
+      if (forgetMatch) {
+        forget(forgetMatch[1]);
+        return;
+      }
+
+      // ── PENDING ENROLLMENT ──
+      if (pendingEnrollRef.current) {
+        const name = pendingEnrollRef.current;
+        pendingEnrollRef.current = null;
+        commitEnrollment(name, transcript);
+        return;
+      }
+
+      identifyThenAsk(transcript);
     };
-    acquire();
-    const onVis = () => { if (document.visibilityState === "visible") acquire(); };
-    document.addEventListener("visibilitychange", onVis);
+
+    recog.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      toast.error(`Speech error: ${e.error}`);
+    };
+
+    recog.onend = () => {
+      if (armedRef.current && !busyRef.current) {
+        setTimeout(() => { try { recog.start(); } catch (e) {} }, 300);
+      }
+    };
+
+    // Auto-start
+    armedRef.current = true;
+    setMode("listening", "Listening — just speak to Promethius");
+    try { recog.start(); } catch (e) {}
+
+    // Rolling recorder for voice identification
+    navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
+      streamRef.current = stream;
+      rollingRef.current = createRollingRecorder(stream, 6000);
+    }).catch(() => {});
+
     return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      try { lock && lock.release(); } catch (e) {}
+      armedRef.current = false;
+      try { recog.stop(); } catch (e) {}
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      rollingRef.current?.stop?.();
     };
-  }, []);
+  }, [supportsSR, setMode, enroll, forget, commitEnrollment, identifyThenAsk]);
 
-  useEffect(() => () => {
-    try { recogRef.current && recogRef.current.stop(); } catch (e) {}
-    try { rollingRef.current && rollingRef.current.stop(); } catch (e) {}
-    try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch (e) {}
-  }, []);
-
+  // ── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div className="relative h-screen w-screen bg-black overflow-hidden select-none">
-      <canvas
-        ref={canvasRef}
-        data-testid="orb-canvas"
-        onClick={awaken}
-        className="absolute inset-0 w-full h-full cursor-pointer"
-      />
+    <div className="relative w-full h-screen bg-black flex flex-col items-center justify-center overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* top controls */}
-      <div className="absolute top-5 right-5 z-20 flex items-center gap-3">
-        <a data-testid="orb-install-guide-link" href="/install" className="text-white/30 hover:text-white/80 transition-colors" title="Local install guide">
-          <BookDown size={20} strokeWidth={1.5} />
-        </a>
-        <button data-testid="orb-fullscreen-button" onClick={toggleFullscreen} className="text-white/30 hover:text-white/80 transition-colors" title={fs ? "Exit fullscreen" : "Fullscreen"}>
-          {fs ? <Minimize size={20} strokeWidth={1.5} /> : <Maximize size={20} strokeWidth={1.5} />}
-        </button>
-        <button data-testid="orb-settings-button" onClick={() => setShowSettings(true)} className="text-white/30 hover:text-white/80 transition-colors" title="Voice & settings">
-          <SettingsIcon size={20} strokeWidth={1.5} />
-        </button>
-        <button data-testid="orb-open-chat-button" onClick={() => navigate("/chat")} className="text-white/30 hover:text-white/80 transition-colors" title="Open prompt window">
-          <MessageSquare size={20} strokeWidth={1.5} />
-        </button>
-        <button data-testid="orb-logout-button" onClick={logout} className="text-white/30 hover:text-white/80 transition-colors" title="Logout">
-          <LogOut size={20} strokeWidth={1.5} />
-        </button>
+      {/* Top bar */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4 z-10">
+        <span className="text-cyan-400 font-bold text-lg tracking-widest select-none">PROMETHIUS</span>
+        <div className="flex gap-3">
+          <button onClick={toggleFullscreen} className="text-cyan-400/60 hover:text-cyan-300 transition-colors">
+            {fs ? <Minimize size={18} /> : <Maximize size={18} />}
+          </button>
+          <button onClick={() => navigate("/chat")} className="text-cyan-400/60 hover:text-cyan-300 transition-colors">
+            <MessageSquare size={18} />
+          </button>
+          <button onClick={() => navigate("/memories")} className="text-cyan-400/60 hover:text-cyan-300 transition-colors">
+            <BookDown size={18} />
+          </button>
+          <button onClick={() => setShowSettings(true)} className="text-cyan-400/60 hover:text-cyan-300 transition-colors">
+            <SettingsIcon size={18} />
+          </button>
+          <button onClick={logout} className="text-cyan-400/60 hover:text-cyan-300 transition-colors">
+            <LogOut size={18} />
+          </button>
+        </div>
       </div>
 
-      {/* status hint */}
-      <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-20 text-center pointer-events-none">
-        <p data-testid="orb-status" className="font-mono text-xs uppercase tracking-[0.3em] text-white/35">{status}</p>
-        {state !== "dormant" && (
-          <p className="font-body text-[11px] text-white/20 mt-2">Say "Promethius..." &nbsp;·&nbsp; "open the prompt" to type</p>
+      {/* Status */}
+      <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-2 z-10">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${
+            state === "listening" ? "bg-cyan-400 animate-pulse" :
+            state === "thinking" ? "bg-yellow-400 animate-spin" :
+            state === "speaking" ? "bg-green-400 animate-pulse" :
+            "bg-gray-600"
+          }`} />
+          <p className="text-cyan-300/70 text-sm font-mono tracking-wide">{status}</p>
+        </div>
+        {user && (
+          <p className="text-cyan-400/30 text-xs font-mono">{user.username}</p>
         )}
       </div>
 
-      {showSettings && <VoiceSettings onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <VoiceSettings
+          configRef={configRef}
+          modelRef={modelRef}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }
