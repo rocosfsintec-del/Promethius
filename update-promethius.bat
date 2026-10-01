@@ -4,8 +4,15 @@ REM  Promethius — ONE-CLICK UPDATE (robust)
 REM  Pulls the latest code from GitHub (even if history was force-pushed),
 REM  updates deps, rebuilds the UI, and restarts. Writes update-log.txt.
 REM =====================================================================
+REM --- Self-relaunch from TEMP so 'git reset --hard' can safely overwrite
+REM     this very file mid-run (otherwise cmd.exe re-reads it and corrupts). -
+if "%~1"=="__inplace__" goto :__run
+copy /y "%~f0" "%TEMP%\promethius-update.bat" >nul 2>&1
+"%TEMP%\promethius-update.bat" __inplace__ "%~dp0"
+exit /b
+:__run
 setlocal enabledelayedexpansion
-set "ROOT=%~dp0"
+set "ROOT=%~2"
 set "LOG=%ROOT%update-log.txt"
 title Promethius Update
 echo ============================================
