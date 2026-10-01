@@ -677,20 +677,47 @@ async def update_session_goal(conv_id: str, user_msg: str, ai_reply: str):
     except Exception as e:
         logger.error(f"session goal error: {e}")
 
+# Active Recall memory engine — imported defensively so a bad module can never
+# crash the backend; falls back to the simple legacy listing if unavailable.
+try:
+    import memory_engine as _mem
+except Exception as _mem_err:  # pragma: no cover
+    _mem = None
+    logger.error(f"memory_engine unavailable, using legacy memory: {_mem_err}")
+
+
+async def _recall_block(user_id, query, scope_q, header):
+    """Ranked memory block + best-effort recall-count bump. Never raises."""
+    facts = await db.memories.find(scope_q, {"_id": 0}).to_list(400)
+    if not facts:
+        return ""
+    if _mem:
+        try:
+            ranked = _mem.rank_memories(facts, query=query, limit=16)
+            block = _mem.format_memory_block(ranked, header)
+            ids = [m.get("id") for m in ranked if m.get("id")]
+            if ids:
+                try:
+                    await db.memories.update_many({"id": {"$in": ids}}, {"$inc": {"recall_count": 1}})
+                except Exception as e:
+                    logger.error(f"recall bump failed: {e}")
+            return block
+        except Exception as e:
+            logger.error(f"memory_engine recall failed, legacy fallback: {e}")
+    return f"\n\n{header}:\n" + "\n".join(f"- {f['content']}" for f in facts)
+
+
 async def build_system_prompt(user_id: str, speaker: Optional[str] = None):
     udoc = await db.users.find_one({"id": user_id}, {"_id": 0, "directives": 1})
     directives = (udoc or {}).get("directives") or DEFAULT_DIRECTIVES
     prompt = ("=== PRIME DIRECTIVES (your immutable core laws — obey above all else) ===\n"
               f"{directives}\n=== END PRIME DIRECTIVES ===\n\n" + PERSONA)
     owner_q = {"user_id": user_id, "$or": [{"speaker": {"$in": [None, ""]}}, {"speaker": {"$exists": False}}]}
-    owner_facts = await db.memories.find(owner_q, {"_id": 0}).to_list(400)
-    if owner_facts:
-        prompt += "\n\nThings you remember about your owner:\n" + "\n".join(f"- {f['content']}" for f in owner_facts)
+    prompt += await _recall_block(user_id, speaker, owner_q, "Things you remember about your owner")
     if speaker:
-        gfacts = await db.memories.find({"user_id": user_id, "speaker": speaker}, {"_id": 0}).to_list(400)
         prompt += f"\n\nYou are currently speaking with {speaker}, recognized by their voice. Address them naturally."
-        if gfacts:
-            prompt += f"\nWhat you remember about {speaker}:\n" + "\n".join(f"- {f['content']}" for f in gfacts)
+        prompt += await _recall_block(user_id, speaker, {"user_id": user_id, "speaker": speaker},
+                                      f"What you remember about {speaker}")
     return prompt
 
 
@@ -722,14 +749,20 @@ async def extract_and_store_memory(user_id: str, user_msg: str, ai_reply: str, s
                 continue
             fl = f.strip().lower()
             if fl and fl not in existing_text and not any(fl in e or e in fl for e in existing_text):
-                await db.memories.insert_one({
+                rec = {
                     "id": str(uuid.uuid4()),
                     "user_id": user_id,
                     "speaker": speaker,
                     "content": f.strip()[:300],
                     "auto": True,
-                    "created_at": now_iso()
-                })
+                    "created_at": now_iso(),
+                }
+                if _mem:
+                    try:
+                        rec.update(_mem.enrich_on_store(rec["content"], auto=True))
+                    except Exception:
+                        pass
+                await db.memories.insert_one(rec)
                 existing_text.append(fl)
     except Exception as e:
         logger.error(f"auto-memory error: {e}")
@@ -2034,8 +2067,36 @@ async def get_memory(user=Depends(get_current_user)):
 @api_router.post("/memory")
 async def add_memory(req: MemoryReq, user=Depends(get_current_user)):
     rec = {"id": str(uuid.uuid4()), "user_id": user["id"], "content": req.content, "created_at": now_iso()}
+    if _mem:
+        try:
+            rec.update(_mem.enrich_on_store(req.content, auto=False))
+        except Exception:
+            pass
     await db.memories.insert_one(dict(rec))
     return rec
+
+
+@api_router.get("/memory/search")
+async def search_memory(q: str, user=Depends(get_current_user)):
+    mems = await db.memories.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    if _mem:
+        try:
+            return _mem.search_memories(mems, q, limit=30)
+        except Exception as e:
+            logger.error(f"memory search failed: {e}")
+    ql = (q or "").lower()
+    return [m for m in mems if ql and ql in (m.get("content", "").lower())][:30]
+
+
+@api_router.get("/memory/stats")
+async def stats_memory(user=Depends(get_current_user)):
+    mems = await db.memories.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
+    if _mem:
+        try:
+            return _mem.compute_stats(mems)
+        except Exception as e:
+            logger.error(f"memory stats failed: {e}")
+    return {"total": len(mems), "by_category": {}, "by_source": {}, "total_recall": 0}
 
 
 @api_router.delete("/memory/{mid}")

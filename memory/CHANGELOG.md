@@ -90,3 +90,10 @@
 - Verified: standalone WebGL test page (public/orbtest.html, since removed) rendered with zero shader/link errors; hue rotation + filaments + core + flame band all correct. Frontend compiles (1 pre-existing warning).
 - Source of truth is now /app Orb.jsx so Save-to-GitHub preserves it (won't be overwritten again).
 - DEPLOY: frontend change -> needs yarn build.
+
+## memory_engine rebuilt — syntax-verified, crash-proof (2026-10 — E1)
+- CONTEXT: a Promethius self-update had added memory_engine with an unmatched ')' on server.py line 762 → backend wouldn't start → passkey/login failed (ERR_CONNECTION_REFUSED). User rolled local back to 451f684 to restore login.
+- Rebuilt backend/memory_engine.py as PURE stdlib-only helpers (no DB, no 3rd-party imports) so importing it can never crash the backend: categorize, score_memory (importance+recall+recency+query overlap), rank_memories, search_memories, format_memory_block, compute_stats, enrich_on_store.
+- server.py wiring (all defensive, guarded import `import memory_engine as _mem`, every call try/except with legacy fallback): build_system_prompt now uses _recall_block() → ranked memory injection + best-effort recall_count $inc; extract_and_store_memory + manual add_memory enrich new rows with category/importance/recall_count; new GET /api/memory/search?q= and GET /api/memory/stats.
+- Verified: ast.parse both files OK; imported and unit-exercised memory_engine (rank/search/categorize/stats/enrich correct); backend boots clean; curl /memory/stats, /memory/search, and /chat (exercises build_system_prompt) all 200. BACKEND-ONLY → no yarn build needed.
+- Deploy: Save to GitHub → git fetch origin → git reset --hard origin/main → restart backend. (Save-to-GitHub overwrites the broken self-pushed memory commits with this verified version.)
