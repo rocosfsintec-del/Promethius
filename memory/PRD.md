@@ -114,3 +114,12 @@ User asked to pull the repo into a fresh workspace and repair it.
 - Added `claude-opus-4-8` ("Claude Opus 4.8") to PROVIDERS["anthropic"] and to
   ChatPanel MODEL_LABELS / MODEL_COST (expensive) / MODEL_PRICING ([15,75]).
   Confirmed the model ID resolves through the Universal proxy (claude-opus-4-8, not 4.8).
+
+## Model Picker billing badges (2026-06)
+- ChatPanel.jsx now shows a "Universal" / "Your Key" / "Local" / "No key" badge next
+  to each model and on the selector trigger, so the user sees which key will be billed.
+- Logic (billingOf) mirrors backend priority: ollama->Local; Universal Key set->Universal
+  for all cloud models; else BYO openai/anthropic key set->Your Key; else No key.
+  Fetches /api/settings/keys on mount (universal_key.set, openai.set, anthropic.set).
+- Added a two-chip legend in the dropdown footer. Verified live via passkey UI: all cloud
+  models show orange "Universal", Ollama shows green "Local".

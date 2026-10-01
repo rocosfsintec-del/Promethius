@@ -99,6 +99,22 @@ const rateLabel = (p, m) => {
 // Live provider reachability: online (green) if not explicitly reported offline.
 const isOnline = (status, p) => (status || {})[p] !== false;
 
+// Which key pays for a given model, mirroring the backend priority:
+// Universal Key is primary for all cloud models; BYO keys are fallback-only.
+const BILLING_STYLES = {
+  universal: { label: "Universal", cls: "bg-orange-500/15 text-orange-300 border-orange-500/25", title: "Billed to your Emergent Universal Key" },
+  byo: { label: "Your Key", cls: "bg-sky-500/15 text-sky-300 border-sky-500/25", title: "Billed to your own pasted API key" },
+  local: { label: "Local", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/25", title: "Runs locally — no API billing" },
+  none: { label: "No key", cls: "bg-zinc-600/20 text-zinc-400 border-zinc-600/30", title: "No key configured — add one in Settings" },
+};
+const billingOf = (p, keys) => {
+  if (p === "ollama") return "local";
+  if (keys?.universal_key?.set) return "universal";
+  if (p === "openai" && keys?.openai?.set) return "byo";
+  if (p === "anthropic" && keys?.anthropic?.set) return "byo";
+  return "none";
+};
+
 export default function ChatPanel({
   conversationId, setConversationId, providers, modelStatus, refreshModelStatus, provider, model,
   onModelChange, refreshConversations,
@@ -118,6 +134,11 @@ export default function ChatPanel({
   const fileRef = useRef(null);
   const mediaRef = useRef(null);
   const chunksRef = useRef([]);
+  const [keyStatus, setKeyStatus] = useState(null);
+
+  useEffect(() => {
+    api.get("/settings/keys").then((r) => setKeyStatus(r.data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!conversationId) {
@@ -276,6 +297,18 @@ export default function ChatPanel({
               title={`${COST_STYLES[costOf(provider, model)].label} cost`}
             />
             {MODEL_LABELS[model] || model}
+            {(() => {
+              const b = BILLING_STYLES[billingOf(provider, keyStatus)];
+              return (
+                <span
+                  data-testid="model-billing-current"
+                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${b.cls}`}
+                  title={b.title}
+                >
+                  {b.label}
+                </span>
+              );
+            })()}
             <span className={`font-mono text-[11px] ${COST_STYLES[costOf(provider, model)].text}`} title={rateLabel(provider, model)}>
               {fmtCost(estMsgCost(provider, model))}
             </span>
@@ -317,6 +350,18 @@ export default function ChatPanel({
                       </span>
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
+                      {(() => {
+                        const b = BILLING_STYLES[billingOf(p, keyStatus)];
+                        return (
+                          <span
+                            data-testid={`model-billing-${m}`}
+                            className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${b.cls}`}
+                            title={b.title}
+                          >
+                            {b.label}
+                          </span>
+                        );
+                      })()}
                       <span data-testid={`model-price-${m}`} className={`font-mono text-[10px] ${cs.text}`}>
                         {fmtCost(estMsgCost(p, m))}
                       </span>
@@ -339,6 +384,12 @@ export default function ChatPanel({
                   ))}
                 </span>
                 <span className="text-zinc-600">est. / msg</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 border-t border-white/5 text-[9px] text-zinc-500">
+                <span className="px-1.5 py-0.5 rounded-full font-semibold border bg-orange-500/15 text-orange-300 border-orange-500/25">Universal</span>
+                <span className="text-zinc-600">= Emergent key ·</span>
+                <span className="px-1.5 py-0.5 rounded-full font-semibold border bg-sky-500/15 text-sky-300 border-sky-500/25">Your Key</span>
+                <span className="text-zinc-600">= your own key</span>
               </div>
               <div className="flex items-center justify-between px-4 pb-2 text-[10px] text-zinc-500">
                 <span className="flex items-center gap-3">
