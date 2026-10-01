@@ -1597,6 +1597,27 @@ async def verify_keys(user=Depends(get_current_user)):
     return out
 
 
+@api_router.post("/system/update")
+async def system_update(user=Depends(get_current_user)):
+    """Admin-only: launch the local one-click updater (git pull -> rebuild -> restart).
+    Only works on a local Windows git clone that ships update-promethius.bat. The updater
+    restarts the backend, so this returns immediately and the UI reloads on the user's command."""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can update Promethius.")
+    if not (APP_ROOT / ".git").exists():
+        raise HTTPException(status_code=400, detail="This install isn't a git clone, so it can't self-update. Re-clone from GitHub to enable updates.")
+    updater = APP_ROOT / "update-promethius.bat"
+    if os.name != "nt" or not updater.is_file():
+        raise HTTPException(status_code=400, detail="In-app update only runs on a local Windows install (update-promethius.bat not found here).")
+    try:
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen(["cmd", "/c", "start", "", str(updater)],
+                         cwd=str(APP_ROOT), creationflags=flags, close_fds=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not launch updater: {str(e)[:150]}")
+    return {"started": True, "note": "Promethius is updating and will restart. Reload once it is back."}
+
+
 # ---------------------------------------------------------------------------
 # Speaker recognition (voiceprints) + per-person profiles
 # ---------------------------------------------------------------------------

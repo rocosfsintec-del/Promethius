@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Flame, Plus, Trash2, Brain, Library, FolderKanban, BookOpen, Clapperboard, Wrench, Clock, LogOut, Shield, Settings as SettingsIcon } from "lucide-react";
+import { Flame, Plus, Trash2, Brain, Library, FolderKanban, BookOpen, Clapperboard, Wrench, Clock, LogOut, Shield, Settings as SettingsIcon, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
+import api from "../lib/api";
 import VoiceSettings from "./VoiceSettings";
 
 const TOOLS = [
@@ -13,6 +15,48 @@ const TOOLS = [
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "schedule", label: "Auto", icon: Clock },
 ];
+
+// Admin-only one-click updater. The backend launches update-promethius.bat
+// (pull -> rebuild -> restart) and the server restarts, so we don't stream
+// progress — we flip to a "Reload" state the user taps once it's back.
+function UpdateButton() {
+  const [state, setState] = useState("idle"); // idle | starting | restarting | error
+
+  const run = async () => {
+    if (state === "restarting") { window.location.reload(); return; }
+    if (state === "starting") return;
+    setState("starting");
+    try {
+      await api.post("/system/update");
+      setState("restarting");
+      toast.success("Updating Promethius… it will restart (~30s). Tap Reload when it's back.");
+    } catch (e) {
+      setState("error");
+      toast.error(e?.response?.data?.detail || "Update failed to start.");
+      setTimeout(() => setState("idle"), 4000);
+    }
+  };
+
+  const label = { idle: "Update", starting: "…", restarting: "Reload", error: "Err" }[state];
+  const color =
+    state === "restarting" ? "text-green-400"
+    : state === "error" ? "text-red-400"
+    : state === "starting" ? "text-orange-400"
+    : "text-zinc-500 hover:text-zinc-200";
+
+  return (
+    <button
+      data-testid="update-promethius-button"
+      onClick={run}
+      disabled={state === "starting"}
+      title={state === "restarting" ? "Click to reload once Promethius is back" : "Update Promethius (admin)"}
+      className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-colors hover:bg-white/5 ${color}`}
+    >
+      <RefreshCw size={17} strokeWidth={1.5} className={state === "starting" ? "animate-spin" : ""} />
+      <span className="text-[9px] font-mono uppercase tracking-wide">{label}</span>
+    </button>
+  );
+}
 
 export default function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, activeTool, setActiveTool }) {
   const { user, logout } = useAuth();
@@ -56,6 +100,7 @@ export default function Sidebar({ conversations, currentId, onSelect, onNew, onD
             <span className="text-[9px] font-mono uppercase tracking-wide">{t.label}</span>
           </button>
         ))}
+        {user?.role === "admin" && <UpdateButton />}
       </div>
 
       <div className="px-3 mt-5 mb-2">
