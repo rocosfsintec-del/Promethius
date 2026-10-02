@@ -9,6 +9,7 @@ import Markdown from "./Markdown";
 import GithubPush from "./GithubPush";
 
 const MODEL_LABELS = {
+  "auto": "Auto",
   "gpt-4o-mini": "GPT-4o mini",
   "gpt-4o": "GPT-4o",
   "gpt-5.5": "GPT-5.5",
@@ -109,6 +110,7 @@ const BILLING_STYLES = {
 };
 const billingOf = (p, keys) => {
   if (p === "ollama") return "local";
+  if (p === "auto") return keys?.universal_key?.set ? "universal" : (keys?.openai?.set || keys?.anthropic?.set ? "byo" : "none");
   if (keys?.universal_key?.set) return "universal";
   if (p === "openai" && keys?.openai?.set) return "byo";
   if (p === "anthropic" && keys?.anthropic?.set) return "byo";
@@ -242,8 +244,14 @@ export default function ChatPanel({
         setConversationId(r.data.conversation_id);
         refreshConversations();
       }
-      setMessages((m) => [...m, { id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text", pushProposal: r.data.push_proposal || null }]);
-      bumpSpend(provider, model, text, r.data.reply);
+      const usedProvider = r.data.provider || provider;
+      const usedModel = r.data.model || model;
+      setMessages((m) => [...m, {
+        id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text",
+        pushProposal: r.data.push_proposal || null,
+        provider: usedProvider, model: usedModel, auto_selected: !!r.data.auto_selected,
+      }]);
+      bumpSpend(usedProvider, usedModel, text, r.data.reply);
       if (r.data.push_proposal) {
         toast.info("Promethius prepared a change — tap “Review & Push” to approve");
       }
@@ -310,34 +318,74 @@ export default function ChatPanel({
             onClick={() => setModelOpen((o) => !o)}
             className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#121214] border border-white/10 hover:border-white/20 text-sm font-medium text-zinc-200 transition-colors"
           >
-            <span
-              className={`w-2 h-2 rounded-full ${COST_STYLES[costOf(provider, model)].dot}`}
-              title={`${COST_STYLES[costOf(provider, model)].label} cost`}
-            />
-            {MODEL_LABELS[model] || model}
-            {(() => {
-              const b = BILLING_STYLES[billingOf(provider, keyStatus)];
-              return (
-                <span
-                  data-testid="model-billing-current"
-                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${b.cls}`}
-                  title={b.title}
-                >
-                  {b.label}
+            {provider === "auto" ? (
+              <>
+                <Zap size={13} className="text-orange-400" strokeWidth={2} />
+                Auto
+                {(() => {
+                  const b = BILLING_STYLES[billingOf("auto", keyStatus)];
+                  return (
+                    <span
+                      data-testid="model-billing-current"
+                      className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${b.cls}`}
+                      title={b.title}
+                    >
+                      {b.label}
+                    </span>
+                  );
+                })()}
+                <span className="font-mono text-[11px] text-zinc-500" title="Promethius diagnoses each message and picks the best model">
+                  picks best
                 </span>
-              );
-            })()}
-            <span className={`font-mono text-[11px] ${COST_STYLES[costOf(provider, model)].text}`} title={rateLabel(provider, model)}>
-              {fmtCost(estMsgCost(provider, model))}
-            </span>
-            <span
-              data-testid="model-status-current"
-              className={`w-1.5 h-1.5 rounded-full ${isOnline(modelStatus, provider) ? "bg-green-500" : "bg-red-500"}`}
-              title={isOnline(modelStatus, provider) ? "Online · reachable" : "Offline · unreachable"}
-            />
+              </>
+            ) : (
+              <>
+                <span
+                  className={`w-2 h-2 rounded-full ${COST_STYLES[costOf(provider, model)].dot}`}
+                  title={`${COST_STYLES[costOf(provider, model)].label} cost`}
+                />
+                {MODEL_LABELS[model] || model}
+                {(() => {
+                  const b = BILLING_STYLES[billingOf(provider, keyStatus)];
+                  return (
+                    <span
+                      data-testid="model-billing-current"
+                      className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${b.cls}`}
+                      title={b.title}
+                    >
+                      {b.label}
+                    </span>
+                  );
+                })()}
+                <span className={`font-mono text-[11px] ${COST_STYLES[costOf(provider, model)].text}`} title={rateLabel(provider, model)}>
+                  {fmtCost(estMsgCost(provider, model))}
+                </span>
+                <span
+                  data-testid="model-status-current"
+                  className={`w-1.5 h-1.5 rounded-full ${isOnline(modelStatus, provider) ? "bg-green-500" : "bg-red-500"}`}
+                  title={isOnline(modelStatus, provider) ? "Online · reachable" : "Offline · unreachable"}
+                />
+              </>
+            )}
           </button>
           {modelOpen && (
-            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-64 backdrop-blur-xl py-1">
+            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-80 backdrop-blur-xl py-1">
+              <button
+                data-testid="model-option-auto"
+                onClick={() => { onModelChange("auto", "auto"); setModelOpen(false); }}
+                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between gap-2 border-b border-white/5 hover:bg-white/5 ${provider === "auto" ? "bg-white/5" : ""}`}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <Zap size={14} className="text-orange-400 shrink-0" strokeWidth={2} />
+                  <span className="flex flex-col">
+                    <span className={provider === "auto" ? "text-orange-400" : "text-zinc-200"}>Auto</span>
+                    <span className="text-[10px] text-zinc-500">Promethius picks the best model per task</span>
+                  </span>
+                </span>
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold border bg-orange-500/15 text-orange-300 border-orange-500/25 shrink-0">
+                  Smart
+                </span>
+              </button>
               {flat.map(({ p, m }) => {
                 const cost = costOf(p, m);
                 const cs = COST_STYLES[cost];
@@ -358,12 +406,12 @@ export default function ChatPanel({
                     className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between gap-2 ${
                       !online
                         ? "opacity-40 cursor-not-allowed"
-                        : `hover:bg-white/5 ${m === model ? "bg-white/5" : ""}`
+                        : `hover:bg-white/5 ${m === model && provider === p ? "bg-white/5" : ""}`
                     }`}
                   >
                     <span className="flex items-center gap-2.5 min-w-0">
                       <span className={`w-2 h-2 rounded-full shrink-0 ${cs.dot}`} title={`${cs.label} cost`} />
-                      <span className={`truncate ${m === model ? "text-orange-400" : cs.text}`}>
+                      <span className={`whitespace-nowrap ${m === model && provider === p ? "text-orange-400" : cs.text}`}>
                         {MODEL_LABELS[m] || m}
                       </span>
                     </span>
@@ -510,15 +558,26 @@ export default function ChatPanel({
                           >
                             ▶ Speak
                           </button>
+                          {m.auto_selected && m.model && (
+                            <span
+                              data-testid="auto-picked-model"
+                              title="Promethius auto-selected this model for your request"
+                              className="text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20 font-mono"
+                            >
+                              <Zap size={10} strokeWidth={2} /> Auto → {MODEL_LABELS[m.model] || m.model}
+                            </span>
+                          )}
                           {(() => {
                             const prev = idx > 0 && messages[idx - 1]?.role === "user" ? messages[idx - 1].content : "";
-                            const c = liveMsgCost(provider, model, prev, m.content);
+                            const mProv = m.provider || provider;
+                            const mMod = m.model || model;
+                            const c = liveMsgCost(mProv, mMod, prev, m.content);
                             if (c == null) return null;
                             return (
                               <span
                                 data-testid="message-cost"
-                                title={`Estimated with ${MODEL_LABELS[model] || model} · ${rateLabel(provider, model)}`}
-                                className={`text-[11px] font-mono ${COST_STYLES[costOf(provider, model)].text}`}
+                                title={`Estimated with ${MODEL_LABELS[mMod] || mMod} · ${rateLabel(mProv, mMod)}`}
+                                className={`text-[11px] font-mono ${COST_STYLES[costOf(mProv, mMod)].text}`}
                               >
                                 {c === 0 ? "Free" : fmtCost(c)}
                               </span>

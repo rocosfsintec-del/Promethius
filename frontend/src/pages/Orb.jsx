@@ -207,7 +207,7 @@ export default function Orb() {
   const [status, setStatus] = useState("Listening — just speak to Promethius");
   const [showSettings, setShowSettings] = useState(false);
   const [fs, setFs] = useState(false);
-  const modelRef = useRef({ provider: "anthropic", model: "claude-sonnet-4-6" });
+  const modelRef = useRef({ provider: "auto", model: "auto" });
 
   const recogRef = useRef(null);
   const audioCtxRef = useRef(null);

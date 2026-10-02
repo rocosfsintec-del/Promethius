@@ -1365,9 +1365,80 @@ async def models_status(user=Depends(get_current_user)):
     return status
 
 
+# Short capability/cost notes the auto-router reasons over when picking a model.
+AUTO_MODEL_MENU = {
+    "openai": {
+        "gpt-4o-mini": "cheapest; simple Q&A, quick chat, short/basic tasks",
+        "gpt-4o": "balanced; general help, light reasoning, vision",
+        "gpt-5.5": "premium OpenAI; hard reasoning, tough problems (expensive)",
+    },
+    "anthropic": {
+        "claude-haiku-4-5": "cheap/fast Claude; simple tasks, quick replies",
+        "claude-sonnet-5": "strong general + coding, great value",
+        "claude-sonnet-5-5": "latest sonnet; strong general + coding",
+        "claude-sonnet-4-6": "solid general + coding",
+        "claude-opus-4-7": "powerful reasoning/coding (expensive)",
+        "claude-opus-4-8": "very powerful reasoning/coding (expensive)",
+        "claude-opus-5-5": "most powerful reasoning/coding (expensive)",
+    },
+}
+
+
+async def auto_select_model(message: str, online: dict, has_images: bool = False):
+    """Diagnose the task and pick the best (cheapest-capable) available model.
+    Returns (provider, model). Falls back to a sensible mid-tier default."""
+    candidates = []
+    for prov in ("openai", "anthropic"):
+        if not online.get(prov):
+            continue
+        for m in PROVIDERS.get(prov, []):
+            candidates.append((prov, m, AUTO_MODEL_MENU.get(prov, {}).get(m, "")))
+    if not candidates:
+        return ("openai", "gpt-4o-mini")
+    menu = "\n".join(f'- provider="{p}" model="{m}": {d}' for p, m, d in candidates)
+    sys_p = (
+        "You are a routing classifier for an AI assistant. Given the user's request, choose the single "
+        "best model to answer it. Prefer the CHEAPEST model that can do the job well. Use premium models "
+        "(opus, gpt-5.5) ONLY for genuinely hard reasoning, complex or long coding, or multi-step analysis. "
+        "Use mini/haiku for simple or quick asks. For coding — especially modifying Promethius's own code — "
+        "prefer a strong Claude model (sonnet or opus). "
+        + ("The request includes image attachments, so pick a vision-capable model. " if has_images else "")
+        + 'Respond with ONLY compact JSON: {"provider":"...","model":"..."} and nothing else.'
+    )
+    prompt = f"Available models:\n{menu}\n\nUser request:\n{message[:2000]}\n\nPick one."
+    try:
+        raw = await run_llm("openai", "gpt-4o-mini", sys_p, [{"role": "user", "content": prompt}])
+        data = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        prov, mod = data.get("provider"), data.get("model")
+        if any(prov == p and mod == m for p, m, _ in candidates):
+            logger.info(f"auto-router picked {prov}/{mod}")
+            return (prov, mod)
+    except Exception as e:
+        logger.info(f"auto-select fallback: {e}")
+    for pref in [("anthropic", "claude-sonnet-5"), ("anthropic", "claude-sonnet-5-5"), ("openai", "gpt-4o")]:
+        if any(pref[0] == p and pref[1] == m for p, m, _ in candidates):
+            return pref
+    return (candidates[0][0], candidates[0][1])
+
+
+
 @api_router.post("/chat")
 async def chat(req: ChatReq, user=Depends(get_current_user)):
     uid = user["id"]
+
+    # Auto mode: diagnose the task and pick the best available model before anything else.
+    auto_selected = False
+    if req.provider == "auto" or req.model == "auto":
+        has_universal = bool(EMERGENT_LLM_KEY)
+        online = {
+            "openai": bool(globals().get("OPENAI_API_KEY") or "") or has_universal,
+            "anthropic": bool(globals().get("ANTHROPIC_API_KEY") or "") or has_universal,
+        }
+        has_images = bool(req.attachment_ids)
+        prov, mod = await auto_select_model(req.message, online, has_images)
+        req.provider, req.model = prov, mod
+        auto_selected = True
+
     if req.conversation_id:
         conv = await db.conversations.find_one({"id": req.conversation_id, "user_id": uid}, {"_id": 0})
         if not conv:
@@ -1446,12 +1517,14 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     ai_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
               "role": "assistant", "content": reply, "type": "text",
               "push_proposal": push_proposal,
+              "provider": req.provider, "model": req.model, "auto_selected": auto_selected,
               "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
     await db.messages.insert_many([user_msg, ai_msg])
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
     asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
     asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
-    return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal}
+    return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal,
+            "provider": req.provider, "model": req.model, "auto_selected": auto_selected}
 
 
 
