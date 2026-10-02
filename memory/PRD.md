@@ -165,3 +165,18 @@ User asked to pull the repo into a fresh workspace and repair it.
 - Added visible version "v27.5.0" (base v27.4.22, bumped for Grok/auto-router/spend-meter/
   scrollable-picker batch). Single source: frontend/src/lib/version.js -> APP_VERSION.
   Shown in Sidebar brand (testid app-version) and Auth screen (testid app-version-auth).
+
+## ⚠️ MUST DO (future) — Remote access / Deployment plan (logged 2026-06)
+Goal: access Promethius from anywhere (away from home), not just local Windows/preview.
+REQUIRED STEPS when ready:
+1. DEPLOY via Emergent "Publish" -> free public URL (promethius.emergent.host), 24/7, auto-SSL,
+   ~10-15 min, 50 credits/month. No custom domain required (custom domain optional branding later,
+   via Manage Publishes -> Domain tab, auto-DNS + auto-SSL).
+2. CRITICAL — WebAuthn passkeys are bound to the domain (rp.id). Passkeys from localhost/preview
+   will NOT work on the deployed domain. DECIDE FINAL DOMAIN BEFORE registering passkeys there so
+   users enroll only once. Confirm backend WebAuthn rp.id / origin match the deployed domain.
+3. Deployed app runs in Emergent cloud -> local .bat self-update/restore buttons are LOCAL ONLY
+   (won't work in prod). Plan a cloud-safe update path if self-update is needed in prod.
+4. Re-save BYO secrets (xAI/Grok, OpenAI, Anthropic, ElevenLabs, etc.) in the DEPLOYED app's
+   settings — local/preview secrets do not carry over.
+5. Run a deployment readiness check before publishing.
