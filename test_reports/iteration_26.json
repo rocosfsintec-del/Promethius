@@ -1,0 +1,25 @@
+{
+  "summary": "Full backend + frontend verification of the Auto-Model Router + widened model dropdown on prom-metrics. ALL TARGETS PASS. Backend (pytest, 5/5): (1) POST /api/chat {provider:'auto',model:'auto', message:'what is 2+2?'} => 200, auto_selected=true, routed to a non-premium model (not opus / not gpt-5.5), reply non-empty. (2) Hard Rust LRU-cache + memory ordering prompt => auto_selected=true and model NOT in {gpt-4o-mini, claude-haiku-4-5} and matches a strong hint (sonnet/opus/gpt-5*); routed to a strong Claude as designed. (3) Manual override provider='anthropic' model='claude-opus-4-8' => auto_selected=false, provider+model echoed exactly, reply ok (confirms claude-opus-4-8 is in PROVIDERS and reachable via Universal Key). (4) After an auto chat, GET /api/conversations/{id}/messages returns the assistant message with provider, model and auto_selected=true persisted — tag will survive reload. (5) Universal Key primary: provider='anthropic' model='claude-sonnet-5' succeeds without any native Anthropic key being set. Frontend (CDP virtual authenticator passkey register → /chat): Auto option (data-testid=model-option-auto) present as the FIRST row with 'Smart' badge; dropdown panel width measured = 320px (w-80) and all 13 full model labels render without truncation (GPT-4o mini / GPT-4o / GPT-5.5 / Claude Sonnet 5.5 / Claude Sonnet 5 / Claude Opus 5.5 / Claude Opus 4.8 / Claude Sonnet 4.6 / Claude Opus 4.7 / Claude Haiku 4.5 / Llama 3.1/Mistral/Qwen Ollama rows disabled). After sending 'what is 2+2?' with Auto/Auto defaults, the assistant reply rendered an 'Auto → GPT-4o mini' chip under the message using data-testid=auto-picked-model — proves the frontend reads provider/model from r.data and the cheap-route decision reached the UI. Zero JS errors (only benign WebGL/AudioWorklet warnings).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter26_auto_router.py",
+    "/app/test_reports/pytest/iter26.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auto_select_model() correctly constrains candidates to online cloud providers (openai, anthropic) and excludes Ollama — matches design. JSON extraction via re.search(r'\\{.*\\}', raw, re.S) is tolerant to classifier wrapping prose; good defensive parsing.",
+    "chat() mutates req.provider/req.model after auto-resolution and echoes them back + persists on ai_msg — single source of truth, no drift between stored and echoed values. Verified via GET /conversations/{id}/messages.",
+    "AUTO_MODEL_MENU lists claude-opus-4-8 so it is a legal auto target; manual override to claude-opus-4-8 verified end-to-end through Universal Key — no native Anthropic key required.",
+    "Fallback preference order (sonnet-5 → sonnet-5-5 → gpt-4o) is sensible for mid-tier default when classifier fails; worth logging the fallback_reason in the response too so UX can surface 'auto fell back' states, but non-blocking.",
+    "Frontend ChatPanel dropdown w-80 (320px) comfortably fits the longest label ('Claude Sonnet 5.5' + Universal badge + est price + online dot). Good."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter26_auto_router.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100%"},
+  "test_credentials": "owner@example.com / Prometheus#2026 for backend; fresh passkey user per run (tester_<uuid>@example.com) via CDP virtual authenticator on prom-metrics.preview.emergentagent.com.",
+  "seed_data_creation": "A few auto-mode conversations (titles like 'what is 2+2?', 'say hello', hard Rust LRU prompt) under owner@example.com and under the transient passkey tester.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auto router: send {provider:'auto', model:'auto', message:'...'}; response has auto_selected=true and the resolved provider/model. Assistant message is stored with same fields and surfaced via GET /api/conversations/{id}/messages. UI shows the pick via data-testid=auto-picked-model ('Auto → <Label>'). Universal Key is primary; claude-sonnet-5 and claude-opus-4-8 both work without native Anthropic key. Dropdown width is w-80 (320px) in ChatPanel.jsx.",
+  "rca of the issue": "N/A — no bugs found."
+}

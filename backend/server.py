@@ -50,6 +50,8 @@ JWT_ALGO = 'HS256'
 _gh_fernet = Fernet(base64.urlsafe_b64encode(_hashlib_top.sha256(("ghpat::" + JWT_SECRET).encode()).digest()))
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
+XAI_API_KEY = os.environ.get('XAI_API_KEY') or ''
+XAI_BASE_URL = os.environ.get('XAI_BASE_URL', 'https://api.x.ai/v1')
 OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
 FAL_KEY = os.environ.get('FAL_KEY') or ''
 TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY') or ''
@@ -78,10 +80,11 @@ EMERGENT_LLM_BASE = INTEGRATION_PROXY_URL.rstrip('/') + '/llm'
 
 # --- Runtime-configurable API keys (users can paste their own in Settings) ---
 # Each field maps to the module global the rest of the code already reads.
-SECRET_FIELDS = ("openai", "anthropic", "elevenlabs", "fal", "tavily", "resend")
+SECRET_FIELDS = ("openai", "anthropic", "xai", "elevenlabs", "fal", "tavily", "resend")
 _SECRET_TO_GLOBAL = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "xai": "XAI_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
     "fal": "FAL_KEY",
     "tavily": "TAVILY_API_KEY",
@@ -126,6 +129,7 @@ PROVIDERS = {
     "anthropic": ["claude-sonnet-5-5", "claude-sonnet-5", "claude-opus-5-5",
                   "claude-opus-4-8", "claude-sonnet-4-6", "claude-opus-4-7",
                   "claude-haiku-4-5"],
+    "xai": ["grok-4.6", "grok-4"],
     "ollama": ["llama3.1", "mistral", "qwen2.5"],
 }
 
@@ -614,6 +618,10 @@ def openai_client(provider: str):
     # Local offline models via Ollama's OpenAI-compatible endpoint.
     if provider == "ollama":
         return AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)
+    # xAI Grok uses the user's own key against xAI's OpenAI-compatible endpoint.
+    # The Emergent Universal Key does NOT cover Grok, so this never falls back to it.
+    if provider == "xai":
+        return AsyncOpenAI(api_key=XAI_API_KEY or "missing", base_url=XAI_BASE_URL)
     # Emergent Universal Key is the PRIMARY path. Its OpenAI-compatible proxy serves
     # both OpenAI *and* Anthropic model names (LiteLLM routes by model name).
     if EMERGENT_LLM_KEY:
@@ -1351,6 +1359,7 @@ async def models_status(user=Depends(get_current_user)):
     status = {
         "openai": bool((globals().get("OPENAI_API_KEY") or "")) or has_universal,
         "anthropic": bool((globals().get("ANTHROPIC_API_KEY") or "")) or has_universal,
+        "xai": bool((globals().get("XAI_API_KEY") or "")),
         "ollama": False,
     }
     try:
@@ -1381,6 +1390,10 @@ AUTO_MODEL_MENU = {
         "claude-opus-4-8": "very powerful reasoning/coding (expensive)",
         "claude-opus-5-5": "most powerful reasoning/coding (expensive)",
     },
+    "xai": {
+        "grok-4.6": "xAI flagship; strong reasoning, coding, agentic + current-events knowledge",
+        "grok-4": "xAI general-purpose; solid reasoning and coding",
+    },
 }
 
 
@@ -1388,7 +1401,7 @@ async def auto_select_model(message: str, online: dict, has_images: bool = False
     """Diagnose the task and pick the best (cheapest-capable) available model.
     Returns (provider, model). Falls back to a sensible mid-tier default."""
     candidates = []
-    for prov in ("openai", "anthropic"):
+    for prov in ("openai", "anthropic", "xai"):
         if not online.get(prov):
             continue
         for m in PROVIDERS.get(prov, []):
@@ -1433,6 +1446,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
         online = {
             "openai": bool(globals().get("OPENAI_API_KEY") or "") or has_universal,
             "anthropic": bool(globals().get("ANTHROPIC_API_KEY") or "") or has_universal,
+            "xai": bool(globals().get("XAI_API_KEY") or ""),
         }
         has_images = bool(req.attachment_ids)
         prov, mod = await auto_select_model(req.message, online, has_images)
@@ -1489,7 +1503,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     images, doc_text = await load_attachments(req.attachment_ids)
     push_proposal = None
     try:
-        if req.provider in ("openai", "anthropic") and not images:
+        if req.provider in ("openai", "anthropic", "xai") and not images:
             cfg = await db.github_config.find_one({"user_id": uid}) or {}
             mem = ""
             self_repo = cfg.get("self_repo") or DEFAULT_SELF_REPO
@@ -1637,6 +1651,7 @@ async def set_directives(req: DirectivesReq, user=Depends(get_current_user)):
 class KeysReq(BaseModel):
     openai: Optional[str] = None
     anthropic: Optional[str] = None
+    xai: Optional[str] = None
     elevenlabs: Optional[str] = None
     fal: Optional[str] = None
     tavily: Optional[str] = None
@@ -1688,7 +1703,7 @@ async def set_keys(req: KeysReq, user=Depends(get_current_user)):
 
 # Fields we can cheaply validate live against the provider. Others (fal) have no
 # free/no-cost check, so we report them as not live-verifiable.
-_VERIFIABLE_KEYS = ("openai", "anthropic", "elevenlabs", "resend", "tavily")
+_VERIFIABLE_KEYS = ("openai", "anthropic", "xai", "elevenlabs", "resend", "tavily")
 
 
 async def _verify_key(field: str, value: str) -> dict:
@@ -1703,6 +1718,9 @@ async def _verify_key(field: str, value: str) -> dict:
             elif field == "anthropic":
                 r = await c.get("https://api.anthropic.com/v1/models",
                                 headers={"x-api-key": value, "anthropic-version": "2023-06-01"})
+            elif field == "xai":
+                r = await c.get(f"{XAI_BASE_URL.rstrip('/')}/models",
+                                headers={"Authorization": f"Bearer {value}"})
             elif field == "elevenlabs":
                 r = await c.get("https://api.elevenlabs.io/v1/user",
                                 headers={"xi-api-key": value})

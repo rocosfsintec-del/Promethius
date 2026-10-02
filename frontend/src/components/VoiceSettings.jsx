@@ -18,6 +18,7 @@ const TABS = [
 const KEY_FIELDS = [
   { id: "openai", label: "OpenAI", hint: "Chat, image, Whisper & TTS" },
   { id: "anthropic", label: "Anthropic", hint: "Claude chat models" },
+  { id: "xai", label: "xAI (Grok)", hint: "Grok 4.6 — needs your own xAI key" },
   { id: "elevenlabs", label: "ElevenLabs", hint: "Premium voice (TTS & STT)" },
   { id: "fal", label: "fal.ai", hint: "Video generation" },
   { id: "tavily", label: "Tavily", hint: "Live web search" },

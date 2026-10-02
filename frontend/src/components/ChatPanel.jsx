@@ -20,6 +20,8 @@ const MODEL_LABELS = {
   "claude-sonnet-4-6": "Claude Sonnet 4.6",
   "claude-opus-4-7": "Claude Opus 4.7",
   "claude-haiku-4-5": "Claude Haiku 4.5",
+  "grok-4.6": "Grok 4.6",
+  "grok-4": "Grok 4",
   "llama3.1": "Llama 3.1 (Ollama)",
   "mistral": "Mistral (Ollama)",
   "qwen2.5": "Qwen 2.5 (Ollama)",
@@ -37,6 +39,8 @@ const MODEL_COST = {
   "claude-opus-5-5": "expensive",
   "claude-opus-4-8": "expensive",
   "claude-opus-4-7": "expensive",
+  "grok-4.6": "moderate",
+  "grok-4": "moderate",
   "llama3.1": "free",
   "mistral": "free",
   "qwen2.5": "free",
@@ -68,6 +72,8 @@ const MODEL_PRICING = {
   "claude-opus-5-5": [15, 75],
   "claude-opus-4-8": [15, 75],
   "claude-opus-4-7": [15, 75],
+  "grok-4.6": [2, 6],
+  "grok-4": [3, 15],
 };
 // Representative message used for the dropdown estimate.
 const EST_IN_TOKENS = 1000;
@@ -110,6 +116,7 @@ const BILLING_STYLES = {
 };
 const billingOf = (p, keys) => {
   if (p === "ollama") return "local";
+  if (p === "xai") return keys?.xai?.set ? "byo" : "none";
   if (p === "auto") return keys?.universal_key?.set ? "universal" : (keys?.openai?.set || keys?.anthropic?.set ? "byo" : "none");
   if (keys?.universal_key?.set) return "universal";
   if (p === "openai" && keys?.openai?.set) return "byo";

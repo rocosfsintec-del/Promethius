@@ -134,3 +134,18 @@ User asked to pull the repo into a fresh workspace and repair it.
 - Replaced the old per-conversation "session-cost" estimate (which recomputed all history
   at the current model rate) with this accurate accumulating meter. testid: session-spend-meter.
 - Verified live via passkey UI: sent a message, meter appeared with Universal Key spend.
+
+## Grok (xAI) BYO provider + Auto-Model Router (2026-06)
+- Added "auto" router: chat() resolves provider/model=="auto" via auto_select_model(), a
+  gpt-4o-mini classifier (Universal Key) that picks the cheapest-capable ONLINE model.
+  Auto is the DEFAULT (Workspace + Orb voice default to "auto"/"auto"); manual pick persists.
+  Response + stored ai_msg carry provider/model/auto_selected; UI shows "Auto → <model>" tag
+  (testid auto-picked-model). Dropdown widened to w-80, no truncation, "Auto (Smart)" pinned top.
+- Added xAI Grok as a BYO provider (Universal Key does NOT cover Grok). PROVIDERS["xai"]=
+  ["grok-4.6","grok-4"]; XAI_API_KEY global + XAI_BASE_URL (https://api.x.ai/v1); openai_client
+  routes provider=="xai" to xAI's OpenAI-compatible endpoint with the user's key (never universal).
+  Added xai to SECRET_FIELDS/_SECRET_TO_GLOBAL, KeysReq, _VERIFIABLE_KEYS (GET /v1/models),
+  models_status, auto-router candidates + AUTO_MODEL_MENU. Frontend: MODEL_LABELS/COST/PRICING
+  (grok-4.6 [2,6], grok-4 [3,15]), billingOf("xai")->"byo", VoiceSettings KEY_FIELDS xai entry.
+- Verified live: owner's xAI key saved+verified (valid), Grok 4.6 direct chat returns a real reply,
+  xai online=true, dropdown shows Grok 4.6/Grok 4 online with blue "Your Key" badge.
