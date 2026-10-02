@@ -247,6 +247,7 @@ class ChatReq(BaseModel):
     use_web_search: bool = False
     attachment_ids: List[str] = []
     speaker: Optional[str] = None
+    reasoning_effort: Optional[str] = None
 
 
 class MemoryReq(BaseModel):
@@ -614,6 +615,18 @@ async def recovery_verify(req: RecoveryVerifyReq):
 # ---------------------------------------------------------------------------
 # LLM core
 # ---------------------------------------------------------------------------
+# Grok reasoning-effort control. grok-4.6 accepts low/medium/high/xhigh.
+XAI_EFFORTS = {"low", "medium", "high", "xhigh"}
+XAI_EFFORT_MODELS = {"grok-4.6"}
+
+
+def _xai_extra(provider: str, model: str, reasoning_effort):
+    """Extra create() kwargs for xAI: pass reasoning_effort only for models that support it."""
+    if provider == "xai" and model in XAI_EFFORT_MODELS and reasoning_effort in XAI_EFFORTS:
+        return {"reasoning_effort": reasoning_effort}
+    return {}
+
+
 def openai_client(provider: str):
     # Local offline models via Ollama's OpenAI-compatible endpoint.
     if provider == "ollama":
@@ -853,7 +866,7 @@ async def load_attachments(attachment_ids: List[str]):
     return images, "\n\n".join(docs)
 
 
-async def run_llm(provider: str, model: str, system_prompt: str, history: list, images=None, doc_text=""):
+async def run_llm(provider: str, model: str, system_prompt: str, history: list, images=None, doc_text="", reasoning_effort=None):
     user_text = history[-1]["content"]
     if doc_text:
         user_text = f"{user_text}\n\nAttached documents:\n{doc_text}"
@@ -920,7 +933,8 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
         msgs.append({"role": "user", "content": content})
     else:
         msgs.append({"role": "user", "content": user_text})
-    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192)
+    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192,
+                                             **_xai_extra(provider, model, reasoning_effort))
     return resp.choices[0].message.content
 
 
@@ -1246,15 +1260,16 @@ GH_TOOL_GUIDANCE = (
 )
 
 
-async def run_chat_openai_tools(provider, model, system_prompt, history, user_id):
+async def run_chat_openai_tools(provider, model, system_prompt, history, user_id, reasoning_effort=None):
     clt = openai_client(provider)
     msgs = [{"role": "system", "content": system_prompt}]
     msgs += [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
     all_tools = _GH_TOOLS_OPENAI + _PDF_TOOLS_OPENAI
     pdf_tool_names = {t["function"]["name"] for t in _PDF_TOOLS_OPENAI}
+    effort_extra = _xai_extra(provider, model, reasoning_effort)
     for _ in range(6):
-        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=all_tools, max_tokens=16000)
+        resp = await clt.chat.completions.create(model=model, messages=msgs, tools=all_tools, max_tokens=16000, **effort_extra)
         choice = resp.choices[0]
         msg = choice.message
         if not msg.tool_calls:
@@ -1289,7 +1304,7 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
                 slim = {k: v for k, v in result.items() if k != "note"}
                 tool_content = json.dumps(slim)
             msgs.append({"role": "tool", "tool_call_id": tc.id, "content": tool_content})
-    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192)
+    resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192, **effort_extra)
     return (resp.choices[0].message.content or ""), proposal
 
 async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
@@ -1517,9 +1532,9 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
             if req.provider == "anthropic" and not EMERGENT_LLM_KEY and ANTHROPIC_API_KEY:
                 reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
             else:
-                reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid)
+                reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid, req.reasoning_effort)
         else:
-            reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text)
+            reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text, req.reasoning_effort)
     except Exception as e:
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")

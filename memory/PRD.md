@@ -149,3 +149,14 @@ User asked to pull the repo into a fresh workspace and repair it.
   (grok-4.6 [2,6], grok-4 [3,15]), billingOf("xai")->"byo", VoiceSettings KEY_FIELDS xai entry.
 - Verified live: owner's xAI key saved+verified (valid), Grok 4.6 direct chat returns a real reply,
   xai online=true, dropdown shows Grok 4.6/Grok 4 online with blue "Your Key" badge.
+
+## Grok reasoning effort control (2026-06)
+- Per-chat low/medium/high/xhigh reasoning effort for Grok 4.6 (speed vs depth).
+  Backend: ChatReq.reasoning_effort; _xai_extra(provider,model,effort) gates it to
+  provider=="xai" and model in XAI_EFFORT_MODELS={"grok-4.6"}, passed as reasoning_effort
+  kwarg into run_chat_openai_tools (both create calls) and run_llm. Verified xAI accepts
+  low & xhigh live.
+- Frontend: segmented control in chat header (testid grok-effort-control, buttons
+  grok-effort-{low,medium,high,xhigh}), visible ONLY when provider=='xai' && model=='grok-4.6',
+  default 'high', persisted in localStorage promethius_grok_effort, sent in /chat payload.
+  Verified via UI: hidden by default, appears on selecting Grok 4.6, xhigh highlights.

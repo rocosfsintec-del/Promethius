@@ -139,6 +139,7 @@ export default function ChatPanel({
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [showPush, setShowPush] = useState(false);
   const [pushProposal, setPushProposal] = useState(null);
+  const [grokEffort, setGrokEffort] = useState(() => localStorage.getItem("promethius_grok_effort") || "high");
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const mediaRef = useRef(null);
@@ -246,6 +247,7 @@ export default function ChatPanel({
         provider, model, message: text,
         use_web_search: webSearch,
         attachment_ids: attIds,
+        reasoning_effort: (provider === "xai" && model === "grok-4.6") ? grokEffort : undefined,
       });
       if (!conversationId) {
         setConversationId(r.data.conversation_id);
@@ -491,6 +493,31 @@ export default function ChatPanel({
             </div>
           )}
         </div>
+        {provider === "xai" && model === "grok-4.6" && (
+          <div
+            data-testid="grok-effort-control"
+            title="Grok reasoning effort — higher = deeper thinking but slower & pricier"
+            className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-[#121214] border border-white/10"
+          >
+            <span className="text-[10px] font-mono text-zinc-500 pl-1.5 pr-0.5 flex items-center gap-1">
+              <Zap size={11} className="text-sky-400" strokeWidth={2} /> effort
+            </span>
+            {["low", "medium", "high", "xhigh"].map((lvl) => (
+              <button
+                key={lvl}
+                data-testid={`grok-effort-${lvl}`}
+                onClick={() => { setGrokEffort(lvl); localStorage.setItem("promethius_grok_effort", lvl); }}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-mono transition-colors ${
+                  grokEffort === lvl
+                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                    : "text-zinc-500 hover:text-zinc-300 border border-transparent"
+                }`}
+              >
+                {lvl}
+              </button>
+            ))}
+          </div>
+        )}
         {spend.n > 0 && (
           <div
             data-testid="session-spend-meter"
