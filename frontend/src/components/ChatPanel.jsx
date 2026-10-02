@@ -378,7 +378,8 @@ export default function ChatPanel({
             )}
           </button>
           {modelOpen && (
-            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl overflow-hidden w-80 backdrop-blur-xl py-1">
+            <div className="absolute top-12 left-0 z-50 bg-[#121214] border border-white/10 rounded-xl shadow-2xl max-h-[72vh] flex flex-col w-80 backdrop-blur-xl py-1">
+              <div className="overflow-y-auto overscroll-contain min-h-0">
               <button
                 data-testid="model-option-auto"
                 onClick={() => { onModelChange("auto", "auto"); setModelOpen(false); }}
@@ -449,6 +450,7 @@ export default function ChatPanel({
                   </button>
                 );
               })}
+              </div>
               <div className="flex items-center justify-between px-4 py-2 mt-1 border-t border-white/5 text-[10px] text-zinc-500">
                 <span className="flex items-center gap-3">
                   {Object.values(COST_STYLES).map((c) => (
