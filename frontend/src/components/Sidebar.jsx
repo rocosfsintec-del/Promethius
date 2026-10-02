@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
 import VoiceSettings from "./VoiceSettings";
+import { APP_VERSION } from "../lib/version";
 
 const TOOLS = [
   { id: "memory", label: "Memory", icon: Brain },
@@ -73,6 +74,7 @@ export default function Sidebar({ conversations, currentId, onSelect, onNew, onD
       >
         <Flame className="text-orange-500" size={24} strokeWidth={1.5} />
         <span className="font-heading text-xl font-bold tracking-tight">Promethius</span>
+        <span data-testid="app-version" className="ml-auto font-mono text-[10px] text-zinc-500 tracking-wide">{APP_VERSION}</span>
       </button>
 
       <div className="px-3">

@@ -160,3 +160,8 @@ User asked to pull the repo into a fresh workspace and repair it.
   grok-effort-{low,medium,high,xhigh}), visible ONLY when provider=='xai' && model=='grok-4.6',
   default 'high', persisted in localStorage promethius_grok_effort, sent in /chat payload.
   Verified via UI: hidden by default, appears on selecting Grok 4.6, xhigh highlights.
+
+## App version label (2026-06)
+- Added visible version "v27.5.0" (base v27.4.22, bumped for Grok/auto-router/spend-meter/
+  scrollable-picker batch). Single source: frontend/src/lib/version.js -> APP_VERSION.
+  Shown in Sidebar brand (testid app-version) and Auth screen (testid app-version-auth).
