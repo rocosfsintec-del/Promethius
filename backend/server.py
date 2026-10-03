@@ -1971,6 +1971,22 @@ async def system_version():
             "commits": commits, "date": date, "display": display}
 
 
+@api_router.get("/system/update-check")
+async def system_update_check():
+    """Report whether the remote branch is ahead of this checkout (an update is waiting).
+    Does a lightweight, timeout-guarded git fetch; safe no-op off a git clone or offline."""
+    if not (APP_ROOT / ".git").exists():
+        return {"available": False, "behind": 0, "reason": "not a git clone"}
+    upstream = _git_out(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]) or "origin/main"
+    _git_out(["fetch", "--quiet"])
+    behind_raw = _git_out(["rev-list", "--count", f"HEAD..{upstream}"])
+    try:
+        behind = int(behind_raw) if behind_raw else 0
+    except ValueError:
+        behind = 0
+    return {"available": behind > 0, "behind": behind, "upstream": upstream}
+
+
 
 # ---------------------------------------------------------------------------
 # Speaker recognition (voiceprints) + per-person profiles

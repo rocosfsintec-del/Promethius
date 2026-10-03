@@ -241,3 +241,12 @@ REQUIRED STEPS when ready:
   Auth fetch on mount and render the live display (testids app-version / app-version-auth).
   Verified: endpoint returns v27.5.0 · 9f546f6; login screen shows it live.
 - Mechanism: update-promethius.bat (git pull) changes HEAD commit -> display updates with no edit.
+
+## Update-available pulse indicator (2026-06)
+- New public endpoint GET /api/system/update-check: timeout-guarded `git fetch` then
+  `git rev-list --count HEAD..<upstream>` (upstream from @{u} or origin/main). Returns
+  {available, behind, upstream}. Safe no-op off a git clone/offline (behind=0).
+- Sidebar UpdateButton (admin-only) polls it on mount + every 3 min. When behind>0: button
+  turns orange, pulses (animate-pulse + orange ring + glow shadow), shows a pinging corner dot
+  (testid update-available-dot), label "Update!", tooltip "Update available — N new commit(s)".
+  Exposes data-update-available attribute. Verified via route-mock (behind:3 + admin role).

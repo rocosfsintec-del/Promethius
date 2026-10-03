@@ -22,6 +22,20 @@ const TOOLS = [
 // progress — we flip to a "Reload" state the user taps once it's back.
 function UpdateButton() {
   const [state, setState] = useState("idle"); // idle | starting | restarting | error
+  const [behind, setBehind] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await api.get("/system/update-check");
+        if (alive) setBehind(r.data?.behind || 0);
+      } catch { /* offline / not a clone — ignore */ }
+    };
+    check();
+    const id = setInterval(check, 180000); // re-check every 3 min
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const run = async () => {
     if (state === "restarting") { window.location.reload(); return; }
@@ -38,21 +52,36 @@ function UpdateButton() {
     }
   };
 
-  const label = { idle: "Update", starting: "…", restarting: "Reload", error: "Err" }[state];
+  const updateAvailable = state === "idle" && behind > 0;
+  const label = { idle: updateAvailable ? "Update!" : "Update", starting: "…", restarting: "Reload", error: "Err" }[state];
   const color =
     state === "restarting" ? "text-green-400"
     : state === "error" ? "text-red-400"
     : state === "starting" ? "text-orange-400"
+    : updateAvailable ? "text-orange-400"
     : "text-zinc-500 hover:text-zinc-200";
 
   return (
     <button
       data-testid="update-promethius-button"
+      data-update-available={updateAvailable}
       onClick={run}
       disabled={state === "starting"}
-      title={state === "restarting" ? "Click to reload once Promethius is back" : "Update Promethius (admin)"}
-      className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-colors hover:bg-white/5 ${color}`}
+      title={
+        state === "restarting" ? "Click to reload once Promethius is back"
+        : updateAvailable ? `Update available — ${behind} new commit${behind === 1 ? "" : "s"} on the remote. Click to pull & rebuild.`
+        : "Update Promethius (admin)"
+      }
+      className={`relative flex flex-col items-center gap-1 py-2 rounded-lg transition-colors hover:bg-white/5 ${color} ${
+        updateAvailable ? "bg-orange-500/10 ring-1 ring-orange-500/40 animate-pulse shadow-[0_0_14px_rgba(249,115,22,0.35)]" : ""
+      }`}
     >
+      {updateAvailable && (
+        <span
+          data-testid="update-available-dot"
+          className="absolute top-1 right-2 w-2 h-2 rounded-full bg-orange-500 ring-2 ring-orange-500/40 animate-ping"
+        />
+      )}
       <RefreshCw size={17} strokeWidth={1.5} className={state === "starting" ? "animate-spin" : ""} />
       <span className="text-[9px] font-mono uppercase tracking-wide">{label}</span>
     </button>
