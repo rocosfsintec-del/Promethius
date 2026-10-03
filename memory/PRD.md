@@ -194,3 +194,14 @@ REQUIRED STEPS when ready:
 - Verified: helper shapes correct via unit asserts; Universal Claude path no regression
   (claude-sonnet-5 chat OK). Live two-call cache-hit test NOT run in preview (no Anthropic
   BYO key here) — it will engage on the local Anthropic path.
+
+## Auto-prefers-Grok + Cache savings readout (2026-06)
+- Auto-router now STRONGLY prefers xai/grok-4.6 for current-events/news/real-time/live-price
+  questions (Grok has live web/X access) and for very long context (has_long_context = msg>6000
+  chars or >=3 attachments), but only when Grok is online (xai key set). Verified: current-events
+  -> grok-4.6; simple math -> gpt-4o-mini; coding -> claude-sonnet-5-5 (Grok doesn't bleed into coding).
+- Cache savings readout: chat() accumulates Claude cache tokens via cache_sink passed to
+  run_llm/run_chat_anthropic_tools; returns + stores ai_msg.cache = {read, created}. Frontend
+  renders an emerald "cache read N / new M" badge per assistant message (testid cache-readout).
+  NOTE: only populates on the NATIVE Anthropic path (local setup / no-Universal fallback);
+  cache is null via the Universal proxy. Verified field flows end-to-end (null in preview).

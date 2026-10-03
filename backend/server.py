@@ -645,11 +645,14 @@ def _anthropic_cached_tools(tools: list):
     return out
 
 
-def _log_cache_usage(where: str, usage):
-    """Log Claude cache hit/miss token counts to confirm caching actually engaged."""
+def _log_cache_usage(where: str, usage, sink: dict = None):
+    """Log Claude cache hit/miss token counts and (optionally) accumulate them into sink."""
     try:
         cc = getattr(usage, "cache_creation_input_tokens", 0) or 0
         cr = getattr(usage, "cache_read_input_tokens", 0) or 0
+        if sink is not None:
+            sink["cache_creation"] = sink.get("cache_creation", 0) + cc
+            sink["cache_read"] = sink.get("cache_read", 0) + cr
         if cc or cr:
             logger.info(f"[cache] {where}: created={cc} read={cr} (saved ~{cr} input tokens)")
     except Exception:
@@ -895,7 +898,7 @@ async def load_attachments(attachment_ids: List[str]):
     return images, "\n\n".join(docs)
 
 
-async def run_llm(provider: str, model: str, system_prompt: str, history: list, images=None, doc_text="", reasoning_effort=None):
+async def run_llm(provider: str, model: str, system_prompt: str, history: list, images=None, doc_text="", reasoning_effort=None, usage_sink=None):
     user_text = history[-1]["content"]
     if doc_text:
         user_text = f"{user_text}\n\nAttached documents:\n{doc_text}"
@@ -949,7 +952,7 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
             logger.error(f"[LOUD] Anthropic API call failed: {e}")
             raise
 
-        _log_cache_usage("run_llm", resp.usage)
+        _log_cache_usage("run_llm", resp.usage, usage_sink)
         return "".join(getattr(b, "text", "") for b in resp.content)
 
     clt = openai_client(provider)
@@ -1337,7 +1340,7 @@ async def run_chat_openai_tools(provider, model, system_prompt, history, user_id
     resp = await clt.chat.completions.create(model=model, messages=msgs, max_tokens=8192, **effort_extra)
     return (resp.choices[0].message.content or ""), proposal
 
-async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
+async def run_chat_anthropic_tools(model, system_prompt, history, user_id, usage_sink=None):
     clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
     msgs = [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
@@ -1347,7 +1350,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     for _ in range(6):
         resp = await clt.messages.create(model=model, max_tokens=16000, system=cached_system,
                                          messages=msgs, tools=all_tools)
-        _log_cache_usage("anthropic_tools", resp.usage)
+        _log_cache_usage("anthropic_tools", resp.usage, usage_sink)
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
         if not tool_uses:
             return "".join(getattr(b, "text", "") for b in resp.content), proposal
@@ -1368,7 +1371,7 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
             results.append({"type": "tool_result", "tool_use_id": tu.id, "content": tool_content})
         msgs.append({"role": "user", "content": results})
     resp = await clt.messages.create(model=model, max_tokens=8192, system=cached_system, messages=msgs)
-    _log_cache_usage("anthropic_tools_final", resp.usage)
+    _log_cache_usage("anthropic_tools_final", resp.usage, usage_sink)
     return "".join(getattr(b, "text", "") for b in resp.content), proposal
 
 
@@ -1445,7 +1448,7 @@ AUTO_MODEL_MENU = {
 }
 
 
-async def auto_select_model(message: str, online: dict, has_images: bool = False):
+async def auto_select_model(message: str, online: dict, has_images: bool = False, has_long_context: bool = False):
     """Diagnose the task and pick the best (cheapest-capable) available model.
     Returns (provider, model). Falls back to a sensible mid-tier default."""
     candidates = []
@@ -1456,6 +1459,7 @@ async def auto_select_model(message: str, online: dict, has_images: bool = False
             candidates.append((prov, m, AUTO_MODEL_MENU.get(prov, {}).get(m, "")))
     if not candidates:
         return ("openai", "gpt-4o-mini")
+    grok_available = online.get("xai") and any(p == "xai" for p, _, _ in candidates)
     menu = "\n".join(f'- provider="{p}" model="{m}": {d}' for p, m, d in candidates)
     sys_p = (
         "You are a routing classifier for an AI assistant. Given the user's request, choose the single "
@@ -1464,6 +1468,13 @@ async def auto_select_model(message: str, online: dict, has_images: bool = False
         "Use mini/haiku for simple or quick asks. For coding — especially modifying Promethius's own code — "
         "prefer a strong Claude model (sonnet or opus). "
         + ("The request includes image attachments, so pick a vision-capable model. " if has_images else "")
+        + (("STRONGLY PREFER provider=\"xai\" model=\"grok-4.6\" when the request is about current events, "
+            "news, recent/real-time/up-to-date information, live prices, or anything requiring fresh knowledge "
+            "(Grok has live web/X access that other models lack). ALSO prefer grok-4.6 for VERY LONG context "
+            "(large pasted documents or very long inputs) thanks to its large context window. ")
+           if grok_available else "")
+        + (("The request carries a very long context, so favor grok-4.6 (large context window) if available. "
+            if (has_long_context and grok_available) else ""))
         + 'Respond with ONLY compact JSON: {"provider":"...","model":"..."} and nothing else.'
     )
     prompt = f"Available models:\n{menu}\n\nUser request:\n{message[:2000]}\n\nPick one."
@@ -1497,7 +1508,8 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
             "xai": bool(globals().get("XAI_API_KEY") or ""),
         }
         has_images = bool(req.attachment_ids)
-        prov, mod = await auto_select_model(req.message, online, has_images)
+        has_long_context = len(req.message or "") > 6000 or len(req.attachment_ids) >= 3
+        prov, mod = await auto_select_model(req.message, online, has_images, has_long_context)
         req.provider, req.model = prov, mod
         auto_selected = True
 
@@ -1550,6 +1562,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
 
     images, doc_text = await load_attachments(req.attachment_ids)
     push_proposal = None
+    cache_sink = {"cache_read": 0, "cache_creation": 0}
     try:
         if req.provider in ("openai", "anthropic", "xai") and not images:
             cfg = await db.github_config.find_one({"user_id": uid}) or {}
@@ -1563,14 +1576,18 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
             if doc_text:
                 hist = history[:-1] + [{"role": "user", "content": history[-1]["content"] + f"\n\nAttached documents:\n{doc_text}"}]
             if req.provider == "anthropic" and not EMERGENT_LLM_KEY and ANTHROPIC_API_KEY:
-                reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid)
+                reply, push_proposal = await run_chat_anthropic_tools(req.model, tool_system, hist, uid, cache_sink)
             else:
                 reply, push_proposal = await run_chat_openai_tools(req.provider, req.model, tool_system, hist, uid, req.reasoning_effort)
         else:
-            reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text, req.reasoning_effort)
+            reply = await run_llm(req.provider, req.model, system_prompt, history, images, doc_text, req.reasoning_effort, cache_sink)
     except Exception as e:
         logger.error(f"llm error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)[:200]}")
+
+    cache_info = None
+    if cache_sink["cache_read"] or cache_sink["cache_creation"]:
+        cache_info = {"read": cache_sink["cache_read"], "created": cache_sink["cache_creation"]}
 
     ts = datetime.now(timezone.utc)
     user_msg = {"id": str(uuid.uuid4()), "conversation_id": conv["id"], "user_id": uid,
@@ -1580,13 +1597,15 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
               "role": "assistant", "content": reply, "type": "text",
               "push_proposal": push_proposal,
               "provider": req.provider, "model": req.model, "auto_selected": auto_selected,
+              "cache": cache_info,
               "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
     await db.messages.insert_many([user_msg, ai_msg])
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
     asyncio.create_task(extract_and_store_memory(uid, req.message, reply, req.speaker))
     asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
     return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal,
-            "provider": req.provider, "model": req.model, "auto_selected": auto_selected}
+            "provider": req.provider, "model": req.model, "auto_selected": auto_selected,
+            "cache": cache_info}
 
 
 

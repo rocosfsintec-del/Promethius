@@ -259,6 +259,7 @@ export default function ChatPanel({
         id: Date.now() + "a", role: "assistant", content: r.data.reply, type: "text",
         pushProposal: r.data.push_proposal || null,
         provider: usedProvider, model: usedModel, auto_selected: !!r.data.auto_selected,
+        cache: r.data.cache || null,
       }]);
       bumpSpend(usedProvider, usedModel, text, r.data.reply);
       if (r.data.push_proposal) {
@@ -601,6 +602,15 @@ export default function ChatPanel({
                               className="text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/20 font-mono"
                             >
                               <Zap size={10} strokeWidth={2} /> Auto → {MODEL_LABELS[m.model] || m.model}
+                            </span>
+                          )}
+                          {m.cache && (m.cache.read > 0 || m.cache.created > 0) && (
+                            <span
+                              data-testid="cache-readout"
+                              title={`Claude prompt cache — read ${m.cache.read} cached input tokens (billed ~90% cheaper), wrote ${m.cache.created} new cached tokens this turn`}
+                              className="text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono"
+                            >
+                              <Zap size={10} strokeWidth={2} /> cache {m.cache.read > 0 ? `read ${m.cache.read.toLocaleString()}` : `new ${m.cache.created.toLocaleString()}`}
                             </span>
                           )}
                           {(() => {
