@@ -231,3 +231,13 @@ REQUIRED STEPS when ready:
   ordered/deduped [{url,title}] from output[].content[].annotations. Stored on ai_msg.sources +
   returned in response. Frontend renders numbered clickable domain chips under the reply
   (testid source-chips / source-chip-N), open in new tab. Verified in UI: clean text + chips.
+
+## Auto-updating version (2026-06)
+- Version is now derived live from git, so it changes automatically on every update/pull.
+  Base in /app/VERSION ("27.5.0", bump for big releases). New public endpoint
+  GET /api/system/version -> {base, version, commit(short), commits(count), date, display}
+  where display = "v<base> · <shorthash>". Uses _git_out() (git rev-parse/rev-list/log at APP_ROOT).
+- Frontend: lib/version.js exports APP_VERSION (static fallback) + fetchVersion(); Sidebar and
+  Auth fetch on mount and render the live display (testids app-version / app-version-auth).
+  Verified: endpoint returns v27.5.0 · 9f546f6; login screen shows it live.
+- Mechanism: update-promethius.bat (git pull) changes HEAD commit -> display updates with no edit.

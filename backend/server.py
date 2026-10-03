@@ -1941,6 +1941,37 @@ async def system_restore(request: Request):
     return {"started": True, "commit": commit[:8], "note": "Restoring last good version and restarting. Reload once it is back."}
 
 
+def _git_out(args):
+    """Run a git command at the repo root; return stripped output or ''."""
+    try:
+        return subprocess.check_output(["git", *args], cwd=str(APP_ROOT),
+                                       stderr=subprocess.DEVNULL, timeout=4).decode().strip()
+    except Exception:
+        return ""
+
+
+@api_router.get("/system/version")
+async def system_version():
+    """Live app version. The base (major.minor.patch) comes from the VERSION file;
+    the short git commit + date are derived at runtime, so the displayed version changes
+    automatically every time Promethius is updated (git pull / update-promethius.bat).
+    Public (no auth) because the login screen shows it too."""
+    base = "0.0.0"
+    try:
+        vf = APP_ROOT / "VERSION"
+        if vf.is_file():
+            base = (vf.read_text(encoding="utf-8").strip() or base)
+    except Exception:
+        pass
+    commit = _git_out(["rev-parse", "--short", "HEAD"])
+    commits = _git_out(["rev-list", "--count", "HEAD"])
+    date = _git_out(["log", "-1", "--format=%cd", "--date=short"])
+    display = f"v{base}" + (f" · {commit}" if commit else "")
+    return {"base": base, "version": f"v{base}", "commit": commit,
+            "commits": commits, "date": date, "display": display}
+
+
+
 # ---------------------------------------------------------------------------
 # Speaker recognition (voiceprints) + per-person profiles
 # ---------------------------------------------------------------------------

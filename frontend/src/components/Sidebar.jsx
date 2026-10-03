@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Flame, Plus, Trash2, Brain, Library, FolderKanban, BookOpen, Clapperboard, Wrench, Clock, LogOut, Shield, Settings as SettingsIcon, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
 import VoiceSettings from "./VoiceSettings";
-import { APP_VERSION } from "../lib/version";
+import { APP_VERSION, fetchVersion } from "../lib/version";
 
 const TOOLS = [
   { id: "memory", label: "Memory", icon: Brain },
@@ -63,6 +63,8 @@ export default function Sidebar({ conversations, currentId, onSelect, onNew, onD
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showSettings, setShowSettings] = useState(false);
+  const [version, setVersion] = useState(APP_VERSION);
+  useEffect(() => { fetchVersion().then(setVersion); }, []);
 
   return (
     <div className="w-72 border-r border-white/5 bg-[#09090b] flex flex-col h-full shrink-0">
@@ -74,7 +76,7 @@ export default function Sidebar({ conversations, currentId, onSelect, onNew, onD
       >
         <Flame className="text-orange-500" size={24} strokeWidth={1.5} />
         <span className="font-heading text-xl font-bold tracking-tight">Promethius</span>
-        <span data-testid="app-version" className="ml-auto font-mono text-[10px] text-zinc-500 tracking-wide">{APP_VERSION}</span>
+        <span data-testid="app-version" className="ml-auto font-mono text-[10px] text-zinc-500 tracking-wide">{version}</span>
       </button>
 
       <div className="px-3">

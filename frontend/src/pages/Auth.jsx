@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Flame, Loader2, Fingerprint, KeyRound } from "lucide-react";
 import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
-import { APP_VERSION } from "../lib/version";
+import { APP_VERSION, fetchVersion } from "../lib/version";
 
 const BG = "https://images.pexels.com/photos/9665179/pexels-photo-9665179.jpeg";
 
@@ -16,6 +16,8 @@ export default function Auth() {
   const [mode, setMode] = useState("login"); // login | register | recover
   const [code, setCode] = useState("");
   const [recoverStep, setRecoverStep] = useState("email");
+  const [version, setVersion] = useState(APP_VERSION);
+  useEffect(() => { fetchVersion().then(setVersion); }, []);
   const [restoring, setRestoring] = useState(false);
 
   const restore = async () => {
@@ -100,7 +102,7 @@ export default function Auth() {
           <div className="flex items-center gap-3 mb-6">
             <Flame className="text-orange-500" size={32} strokeWidth={1.5} />
             <span className="font-heading text-3xl font-bold tracking-tight">Promethius</span>
-            <span data-testid="app-version-auth" className="font-mono text-xs text-zinc-500 self-end mb-1">{APP_VERSION}</span>
+            <span data-testid="app-version-auth" className="font-mono text-xs text-zinc-500 self-end mb-1">{version}</span>
           </div>
           <h2 className="font-heading text-4xl font-medium tracking-tighter leading-tight text-zinc-100">
             The fire of knowledge,
