@@ -220,3 +220,14 @@ REQUIRED STEPS when ready:
   sessionStorage (promethius_session_cache_saved); green "cache saved N tok" pill next to the
   spend meter (testid session-cache-saved); resets with the spend meter. Only shows on native
   Anthropic path (local). bumpCacheSaved(r.data.cache.read) on each reply.
+
+## Live Search scope + source chips (2026-06)
+- ChatReq.search_scope ("web"|"x"|"both", default both) -> run_grok_live_search maps to
+  tools=[web_search]/[x_search]/both. Frontend segmented control (testid search-scope-control,
+  buttons search-scope-{both,web,x}) shows only when provider=='xai' && webSearch on; persisted
+  localStorage promethius_search_scope; sent in /chat payload.
+- Source chips: run_grok_live_search now passes include=['no_inline_citations'] to the Responses
+  API (FIXES mangled inline citation tokens in text) and returns (text, sources) where sources =
+  ordered/deduped [{url,title}] from output[].content[].annotations. Stored on ai_msg.sources +
+  returned in response. Frontend renders numbered clickable domain chips under the reply
+  (testid source-chips / source-chip-N), open in new tab. Verified in UI: clean text + chips.

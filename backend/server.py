@@ -248,6 +248,7 @@ class ChatReq(BaseModel):
     attachment_ids: List[str] = []
     speaker: Optional[str] = None
     reasoning_effort: Optional[str] = None
+    search_scope: Optional[str] = "both"
 
 
 class MemoryReq(BaseModel):
@@ -971,29 +972,64 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
     return resp.choices[0].message.content
 
 
-async def run_grok_live_search(model, system_prompt, history, reasoning_effort=None):
-    """Grok real-time answer via xAI's Agent Tools (Responses API): live web + X search
-    with inline [[n]](url) citations baked into the text. Uses the user's own xAI key."""
+async def run_grok_live_search(model, system_prompt, history, reasoning_effort=None, search_scope="both"):
+    """Grok real-time answer via xAI's Agent Tools (Responses API): live web and/or X search.
+    Returns (text, sources) where sources is an ordered list of {url, title}. Inline [[n]](url)
+    markers are reduced to plain [n] refs so the UI can show numbered source chips instead.
+    Uses the user's own xAI key."""
     clt = AsyncOpenAI(api_key=XAI_API_KEY or "missing", base_url=XAI_BASE_URL)
     conv = [{"role": m["role"], "content": m["content"]} for m in history]
+    scope = (search_scope or "both").lower()
+    if scope == "web":
+        tools = [{"type": "web_search"}]
+    elif scope == "x":
+        tools = [{"type": "x_search"}]
+    else:
+        tools = [{"type": "web_search"}, {"type": "x_search"}]
     kwargs = {
         "model": model,
         "instructions": system_prompt,
         "input": conv,
-        "tools": [{"type": "web_search"}, {"type": "x_search"}],
+        "tools": tools,
+        "include": ["no_inline_citations"],
         "max_output_tokens": 16000,
     }
     if model in XAI_EFFORT_MODELS and reasoning_effort in XAI_EFFORTS:
         kwargs["reasoning"] = {"effort": reasoning_effort}
     resp = await clt.responses.create(**kwargs)
+
+    text = getattr(resp, "output_text", "") or ""
+    # Collect sources from structured annotations (authoritative, ordered, deduped).
+    sources, seen = [], set()
+    try:
+        for item in (getattr(resp, "output", []) or []):
+            if getattr(item, "type", None) != "message":
+                continue
+            for block in (getattr(item, "content", []) or []):
+                for a in (getattr(block, "annotations", []) or []):
+                    u = getattr(a, "url", None)
+                    if u and u not in seen:
+                        seen.add(u)
+                        sources.append({"url": u, "title": getattr(a, "title", None)})
+    except Exception:
+        pass
+    # Fallback: harvest any inline [[n]](url) links if annotations were empty.
+    if not sources:
+        for n, u in re.findall(r"\[\[(\d+)\]\]\((https?://[^)\s]+)\)", text):
+            if u not in seen:
+                seen.add(u)
+                sources.append({"url": u, "title": n})
+    # Reduce inline [[n]](url) markers to plain [n] refs (chips render the links instead).
+    text = re.sub(r"\[\[(\d+)\]\]\((?:https?://[^)\s]+)\)", r"[\1]", text)
+
     try:
         d = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
         used = d.get("server_side_tool_usage_details", {})
-        logger.info(f"[grok-live-search] web={used.get('web_search_calls',0)} "
-                    f"x={used.get('x_search_calls',0)}")
+        logger.info(f"[grok-live-search] scope={scope} web={used.get('web_search_calls',0)} "
+                    f"x={used.get('x_search_calls',0)} sources={len(sources)}")
     except Exception:
         pass
-    return getattr(resp, "output_text", "") or ""
+    return text, sources
 
 
 
@@ -1589,9 +1625,10 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     images, doc_text = await load_attachments(req.attachment_ids)
     push_proposal = None
     cache_sink = {"cache_read": 0, "cache_creation": 0}
+    grok_sources = None
     try:
         if req.provider == "xai" and req.use_web_search and not images:
-            reply = await run_grok_live_search(req.model, system_prompt, history, req.reasoning_effort)
+            reply, grok_sources = await run_grok_live_search(req.model, system_prompt, history, req.reasoning_effort, req.search_scope)
         elif req.provider in ("openai", "anthropic", "xai") and not images:
             cfg = await db.github_config.find_one({"user_id": uid}) or {}
             mem = ""
@@ -1625,7 +1662,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
               "role": "assistant", "content": reply, "type": "text",
               "push_proposal": push_proposal,
               "provider": req.provider, "model": req.model, "auto_selected": auto_selected,
-              "cache": cache_info,
+              "cache": cache_info, "sources": grok_sources,
               "created_at": (ts + timedelta(milliseconds=1)).isoformat()}
     await db.messages.insert_many([user_msg, ai_msg])
     await db.conversations.update_one({"id": conv["id"]}, {"$set": {"updated_at": now_iso(), "provider": req.provider, "model": req.model}})
@@ -1633,7 +1670,7 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     asyncio.create_task(update_session_goal(conv["id"], req.message, reply))
     return {"conversation_id": conv["id"], "reply": reply, "push_proposal": push_proposal,
             "provider": req.provider, "model": req.model, "auto_selected": auto_selected,
-            "cache": cache_info}
+            "cache": cache_info, "sources": grok_sources}
 
 
 

@@ -140,6 +140,7 @@ export default function ChatPanel({
   const [showPush, setShowPush] = useState(false);
   const [pushProposal, setPushProposal] = useState(null);
   const [grokEffort, setGrokEffort] = useState(() => localStorage.getItem("promethius_grok_effort") || "high");
+  const [searchScope, setSearchScope] = useState(() => localStorage.getItem("promethius_search_scope") || "both");
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const mediaRef = useRef(null);
@@ -262,6 +263,7 @@ export default function ChatPanel({
         conversation_id: conversationId,
         provider, model, message: text,
         use_web_search: webSearch,
+        search_scope: searchScope,
         attachment_ids: attIds,
         reasoning_effort: (provider === "xai" && model === "grok-4.6") ? grokEffort : undefined,
       });
@@ -276,6 +278,7 @@ export default function ChatPanel({
         pushProposal: r.data.push_proposal || null,
         provider: usedProvider, model: usedModel, auto_selected: !!r.data.auto_selected,
         cache: r.data.cache || null,
+        sources: r.data.sources || null,
       }]);
       bumpSpend(usedProvider, usedModel, text, r.data.reply);
       if (r.data.cache?.read) bumpCacheSaved(r.data.cache.read);
@@ -538,6 +541,31 @@ export default function ChatPanel({
             ))}
           </div>
         )}
+        {provider === "xai" && webSearch && (
+          <div
+            data-testid="search-scope-control"
+            title="Live Search scope — where Grok looks for fresh info"
+            className="flex items-center gap-1 px-1.5 py-1 rounded-full bg-[#121214] border border-white/10"
+          >
+            <span className="text-[10px] font-mono text-zinc-500 pl-1.5 pr-0.5 flex items-center gap-1">
+              <Globe size={11} className="text-orange-400" strokeWidth={2} /> search
+            </span>
+            {[["both", "web + X"], ["web", "web"], ["x", "X"]].map(([val, label]) => (
+              <button
+                key={val}
+                data-testid={`search-scope-${val}`}
+                onClick={() => { setSearchScope(val); localStorage.setItem("promethius_search_scope", val); }}
+                className={`px-2 py-0.5 rounded-full text-[11px] font-mono transition-colors ${
+                  searchScope === val
+                    ? "bg-orange-500/20 text-orange-300 border border-orange-500/30"
+                    : "text-zinc-500 hover:text-zinc-300 border border-transparent"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {spend.n > 0 && (
           <div
             data-testid="session-spend-meter"
@@ -618,6 +646,31 @@ export default function ChatPanel({
                     ) : (
                       <>
                         <Markdown>{m.content}</Markdown>
+                        {m.sources && m.sources.length > 0 && (
+                          <div data-testid="source-chips" className="mt-3 flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-600 flex items-center gap-1">
+                              <Globe size={11} className="text-orange-400" /> sources
+                            </span>
+                            {m.sources.map((s, i) => {
+                              let host = s.url;
+                              try { host = new URL(s.url).hostname.replace(/^www\./, ""); } catch {}
+                              return (
+                                <a
+                                  key={i}
+                                  data-testid={`source-chip-${i + 1}`}
+                                  href={s.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={s.url}
+                                  className="group flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#1a1a1d] border border-white/10 hover:border-orange-500/40 text-[11px] text-zinc-300 hover:text-orange-300 transition-colors max-w-[240px]"
+                                >
+                                  <span className="text-orange-400 font-mono">{i + 1}</span>
+                                  <span className="truncate">{host}</span>
+                                </a>
+                              );
+                            })}
+                          </div>
+                        )}
                         <div className="mt-2 flex items-center gap-3">
                           <button
                             data-testid="speak-button"
