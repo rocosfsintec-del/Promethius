@@ -627,6 +627,35 @@ def _xai_extra(provider: str, model: str, reasoning_effort):
     return {}
 
 
+def _anthropic_cached_system(system_prompt: str):
+    """Claude prompt caching: return the system prompt as a cacheable content-block list.
+    Caching is silently skipped below the model's token threshold, so this is always safe."""
+    if not system_prompt:
+        return system_prompt
+    return [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+
+
+def _anthropic_cached_tools(tools: list):
+    """Mark the LAST tool with cache_control so the whole tool-definition prefix is cached.
+    Returns a shallow copy; the originals are left untouched."""
+    if not tools:
+        return tools
+    out = [dict(t) for t in tools]
+    out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+    return out
+
+
+def _log_cache_usage(where: str, usage):
+    """Log Claude cache hit/miss token counts to confirm caching actually engaged."""
+    try:
+        cc = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cr = getattr(usage, "cache_read_input_tokens", 0) or 0
+        if cc or cr:
+            logger.info(f"[cache] {where}: created={cc} read={cr} (saved ~{cr} input tokens)")
+    except Exception:
+        pass
+
+
 def openai_client(provider: str):
     # Local offline models via Ollama's OpenAI-compatible endpoint.
     if provider == "ollama":
@@ -913,13 +942,14 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
             resp = await clt.messages.create(
                 model=model,
                 max_tokens=8192,
-                system=system_prompt,
+                system=_anthropic_cached_system(system_prompt),
                 messages=msgs
             )
         except Exception as e:
             logger.error(f"[LOUD] Anthropic API call failed: {e}")
             raise
 
+        _log_cache_usage("run_llm", resp.usage)
         return "".join(getattr(b, "text", "") for b in resp.content)
 
     clt = openai_client(provider)
@@ -1311,11 +1341,13 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
     clt = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
     msgs = [{"role": m["role"], "content": m["content"]} for m in history]
     proposal = None
-    all_tools = _GH_TOOLS_ANTHROPIC + _PDF_TOOLS_ANTHROPIC
+    all_tools = _anthropic_cached_tools(_GH_TOOLS_ANTHROPIC + _PDF_TOOLS_ANTHROPIC)
+    cached_system = _anthropic_cached_system(system_prompt)
     pdf_tool_names = {t["name"] for t in _PDF_TOOLS_ANTHROPIC}
     for _ in range(6):
-        resp = await clt.messages.create(model=model, max_tokens=16000, system=system_prompt,
+        resp = await clt.messages.create(model=model, max_tokens=16000, system=cached_system,
                                          messages=msgs, tools=all_tools)
+        _log_cache_usage("anthropic_tools", resp.usage)
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
         if not tool_uses:
             return "".join(getattr(b, "text", "") for b in resp.content), proposal
@@ -1335,7 +1367,8 @@ async def run_chat_anthropic_tools(model, system_prompt, history, user_id):
                 tool_content = json.dumps(slim)
             results.append({"type": "tool_result", "tool_use_id": tu.id, "content": tool_content})
         msgs.append({"role": "user", "content": results})
-    resp = await clt.messages.create(model=model, max_tokens=8192, system=system_prompt, messages=msgs)
+    resp = await clt.messages.create(model=model, max_tokens=8192, system=cached_system, messages=msgs)
+    _log_cache_usage("anthropic_tools_final", resp.usage)
     return "".join(getattr(b, "text", "") for b in resp.content), proposal
 
 

@@ -180,3 +180,17 @@ REQUIRED STEPS when ready:
 4. Re-save BYO secrets (xAI/Grok, OpenAI, Anthropic, ElevenLabs, etc.) in the DEPLOYED app's
    settings — local/preview secrets do not carry over.
 5. Run a deployment readiness check before publishing.
+
+## Claude prompt caching (2026-06)
+- Added Anthropic ephemeral prompt caching to the NATIVE Anthropic path (run_llm anthropic
+  branch + run_chat_anthropic_tools, incl. its 6-iter tool loop + final call). Helpers:
+  _anthropic_cached_system() -> system as [{type:text,text,cache_control:ephemeral}];
+  _anthropic_cached_tools() -> marks LAST tool with cache_control (caches whole tool prefix);
+  _log_cache_usage() logs cache_creation/cache_read tokens. No beta header (GA). Safe below
+  token threshold (silently skipped). Originals untouched; non-Claude providers unaffected.
+- IMPORTANT: native Anthropic path only runs when NO Universal Key is present (i.e. user's
+  LOCAL setup with their own Anthropic key, or fallback). With Universal primary (preview),
+  Claude goes through the OpenAI-compatible proxy where this caching does not apply.
+- Verified: helper shapes correct via unit asserts; Universal Claude path no regression
+  (claude-sonnet-5 chat OK). Live two-call cache-hit test NOT run in preview (no Anthropic
+  BYO key here) — it will engage on the local Anthropic path.
