@@ -170,6 +170,22 @@ export default function ChatPanel({
     const zero = { universal: 0, total: 0, n: 0 };
     setSpend(zero);
     try { sessionStorage.setItem(SPEND_KEY, JSON.stringify(zero)); } catch {}
+    setCacheSaved(0);
+    try { sessionStorage.setItem(CACHE_KEY, "0"); } catch {}
+  };
+
+  // Running total of Claude cached input tokens reused this session (native Anthropic path).
+  const CACHE_KEY = "promethius_session_cache_saved";
+  const [cacheSaved, setCacheSaved] = useState(() => {
+    try { return Number(sessionStorage.getItem(CACHE_KEY)) || 0; } catch { return 0; }
+  });
+  const bumpCacheSaved = (n) => {
+    if (!n) return;
+    setCacheSaved((s) => {
+      const v = s + n;
+      try { sessionStorage.setItem(CACHE_KEY, String(v)); } catch {}
+      return v;
+    });
   };
 
   useEffect(() => {
@@ -262,6 +278,7 @@ export default function ChatPanel({
         cache: r.data.cache || null,
       }]);
       bumpSpend(usedProvider, usedModel, text, r.data.reply);
+      if (r.data.cache?.read) bumpCacheSaved(r.data.cache.read);
       if (r.data.push_proposal) {
         toast.info("Promethius prepared a change — tap “Review & Push” to approve");
       }
@@ -540,6 +557,20 @@ export default function ChatPanel({
             )}
           </div>
         )}
+        {cacheSaved > 0 && (
+          <div
+            data-testid="session-cache-saved"
+            title={`Claude prompt caching reused ${cacheSaved.toLocaleString()} input tokens this session — cached reads bill ~90% cheaper than fresh input. Click to reset.`}
+            onClick={resetSpend}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#121214] border border-white/10 text-xs font-mono text-zinc-400 cursor-pointer hover:border-emerald-500/40 transition-colors"
+          >
+            <Zap size={12} className="text-emerald-400" strokeWidth={2} />
+            <span className="text-zinc-500">cache saved</span>
+            <span data-testid="session-cache-saved-tokens" className="text-emerald-300">
+              {cacheSaved.toLocaleString()} tok
+            </span>
+          </div>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -692,7 +723,7 @@ export default function ChatPanel({
               className={`h-9 w-9 rounded-full flex items-center justify-center transition-colors ${
                 webSearch ? "text-orange-400 bg-orange-500/10" : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
               }`}
-              title="Web search"
+              title={provider === "xai" ? "Live web + X search (Grok real-time, cited sources)" : "Web search"}
             >
               <Globe size={18} strokeWidth={1.5} />
             </button>

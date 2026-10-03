@@ -971,6 +971,32 @@ async def run_llm(provider: str, model: str, system_prompt: str, history: list, 
     return resp.choices[0].message.content
 
 
+async def run_grok_live_search(model, system_prompt, history, reasoning_effort=None):
+    """Grok real-time answer via xAI's Agent Tools (Responses API): live web + X search
+    with inline [[n]](url) citations baked into the text. Uses the user's own xAI key."""
+    clt = AsyncOpenAI(api_key=XAI_API_KEY or "missing", base_url=XAI_BASE_URL)
+    conv = [{"role": m["role"], "content": m["content"]} for m in history]
+    kwargs = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": conv,
+        "tools": [{"type": "web_search"}, {"type": "x_search"}],
+        "max_output_tokens": 16000,
+    }
+    if model in XAI_EFFORT_MODELS and reasoning_effort in XAI_EFFORTS:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
+    resp = await clt.responses.create(**kwargs)
+    try:
+        d = resp.usage.model_dump() if getattr(resp, "usage", None) else {}
+        used = d.get("server_side_tool_usage_details", {})
+        logger.info(f"[grok-live-search] web={used.get('web_search_calls',0)} "
+                    f"x={used.get('x_search_calls',0)}")
+    except Exception:
+        pass
+    return getattr(resp, "output_text", "") or ""
+
+
+
 # ---------------------------------------------------------------------------
 # GitHub tools for the chat model (read any repo; propose pushes for approval)
 # ---------------------------------------------------------------------------
@@ -1564,7 +1590,9 @@ async def chat(req: ChatReq, user=Depends(get_current_user)):
     push_proposal = None
     cache_sink = {"cache_read": 0, "cache_creation": 0}
     try:
-        if req.provider in ("openai", "anthropic", "xai") and not images:
+        if req.provider == "xai" and req.use_web_search and not images:
+            reply = await run_grok_live_search(req.model, system_prompt, history, req.reasoning_effort)
+        elif req.provider in ("openai", "anthropic", "xai") and not images:
             cfg = await db.github_config.find_one({"user_id": uid}) or {}
             mem = ""
             self_repo = cfg.get("self_repo") or DEFAULT_SELF_REPO

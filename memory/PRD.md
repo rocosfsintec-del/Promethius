@@ -205,3 +205,18 @@ REQUIRED STEPS when ready:
   renders an emerald "cache read N / new M" badge per assistant message (testid cache-readout).
   NOTE: only populates on the NATIVE Anthropic path (local setup / no-Universal fallback);
   cache is null via the Universal proxy. Verified field flows end-to-end (null in preview).
+
+## Grok Live Search + Session cache-savings meter (2026-06)
+- Grok Live Search: xAI "search_parameters"/live_search tool is DEPRECATED (410). Now uses the
+  Agent Tools via the RESPONSES endpoint: AsyncOpenAI(base_url=xai).responses.create(model,
+  instructions=system, input=history, tools=[{type:web_search},{type:x_search}]). output_text
+  comes back with inline [[n]](url) citations. New func run_grok_live_search() (passes
+  reasoning={effort} for grok-4.6). Dispatch: provider=='xai' and use_web_search and not images.
+  Triggered by the existing globe toggle (tooltip updated for Grok). Verified in UI: fresh news
+  + clickable source link rendered via <Markdown>.
+  NOTE: Grok Live Search needs the Responses endpoint + user's xAI key (not chat.completions,
+  not Universal). Usage: server_side_tool_usage_details shows web_search_calls/x_search_calls.
+- Session cache-savings meter: ChatPanel tracks cumulative Claude cache.read tokens in
+  sessionStorage (promethius_session_cache_saved); green "cache saved N tok" pill next to the
+  spend meter (testid session-cache-saved); resets with the spend meter. Only shows on native
+  Anthropic path (local). bumpCacheSaved(r.data.cache.read) on each reply.
