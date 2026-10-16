@@ -125,6 +125,38 @@ function AppearanceTab() {
   );
 }
 
+function AddVoiceForm({ onAdded }) {
+  const [vid, setVid] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!vid.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/voice/custom", { voice_id: vid.trim(), name: name.trim() || null });
+      onAdded(r.data); setVid(""); setName("");
+      toast.success(r.data.verified ? `Added "${r.data.name}"` : `Added "${r.data.name}" (couldn't verify with ElevenLabs — preview it to check)`);
+    } catch (err) { toast.error(err.response?.data?.detail || "Could not add voice"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={submit} data-testid="add-voice-form" className="p-3 rounded-xl border border-dashed border-white/10 bg-[#121218] space-y-2 mb-3">
+      <p className="text-xs text-zinc-400">Add a voice <span className="text-zinc-600">— paste an ElevenLabs Voice ID (library or cloned)</span></p>
+      <div className="flex gap-2">
+        <input data-testid="add-voice-id-input" value={vid} onChange={(e) => setVid(e.target.value)} placeholder="Voice ID"
+          className="flex-1 min-w-0 bg-[#0d0d12] border border-white/10 rounded-lg px-2.5 py-1.5 text-sm font-mono text-zinc-200 focus:outline-none focus:border-orange-500/50" />
+        <input data-testid="add-voice-name-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
+          className="w-32 bg-[#0d0d12] border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/50" />
+        <button data-testid="add-voice-submit" type="submit" disabled={busy || !vid.trim()}
+          className="px-3 rounded-lg bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-40 flex items-center">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function VoiceTab() {
   const [voices, setVoices] = useState([]);
   const [current, setCurrent] = useState(null);
@@ -154,14 +186,28 @@ function VoiceTab() {
     } catch { setPreviewing(null); toast.error("Preview failed"); }
   };
 
+  const added = (v) => setVoices((list) => [v, ...list.filter((x) => x.id !== v.id)]);
+  const remove = async (id, e) => {
+    e.stopPropagation();
+    try { await api.delete(`/voice/custom/${id}`); setVoices((list) => list.filter((x) => x.id !== id)); toast.success("Voice removed"); }
+    catch { toast.error("Could not remove voice"); }
+  };
+
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="animate-spin text-orange-500" /></div>;
   return (
     <div className="space-y-2">
-      {voices.length === 0 && <p className="text-zinc-500 text-sm text-center py-6">No voices found. Check the ElevenLabs key.</p>}
+      <AddVoiceForm onAdded={added} />
+      {voices.length === 0 && <p className="text-zinc-500 text-sm text-center py-6">No voices found. Check the ElevenLabs key or add a Voice ID above.</p>}
       {voices.map((v) => (
         <div key={v.id} data-testid={`voice-option-${v.id}`} onClick={() => select(v.id)}
           className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${current === v.id ? "border-orange-500/50 bg-orange-500/10" : "border-white/5 bg-[#16161c] hover:border-white/15"}`}>
           <span className="flex-1 min-w-0 text-sm text-zinc-200 truncate">{v.name}</span>
+          {v.custom && <span className="text-[10px] uppercase tracking-wide text-orange-400/80 border border-orange-500/30 rounded px-1.5 py-0.5">Added</span>}
+          {v.custom && (
+            <button data-testid={`voice-remove-${v.id}`} onClick={(e) => remove(v.id, e)} className="text-zinc-600 hover:text-red-400" title="Remove from list">
+              <Trash2 size={15} />
+            </button>
+          )}
           <button onClick={(e) => preview(v.id, e)} className="text-zinc-500 hover:text-orange-400" title="Preview">
             {previewing === v.id ? <Loader2 size={16} className="animate-spin" /> : <Volume2 size={16} />}
           </button>

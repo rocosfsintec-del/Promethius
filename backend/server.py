@@ -2045,16 +2045,51 @@ async def delete_speaker(sid: str, user=Depends(get_current_user)):
 
 @api_router.get("/voice/voices")
 async def list_voices(user=Depends(get_current_user)):
-    if not ELEVENLABS_API_KEY:
-        return {"voices": []}
-    try:
-        from elevenlabs.client import ElevenLabs
-        el = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-        res = el.voices.get_all()
-        return {"voices": [{"id": v.voice_id, "name": v.name} for v in res.voices][:30]}
-    except Exception as e:
-        logger.error(f"voices error {e}")
-        return {"voices": []}
+    custom = [{**c, "custom": True} for c in (user.get("custom_voices") or [])]
+    seen = {c["id"] for c in custom}
+    account = []
+    if ELEVENLABS_API_KEY:
+        try:
+            from elevenlabs.client import ElevenLabs
+            el = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+            res = el.voices.get_all()
+            account = [{"id": v.voice_id, "name": v.name} for v in res.voices if v.voice_id not in seen][:30]
+        except Exception as e:
+            logger.error(f"voices error {e}")
+    return {"voices": custom + account}
+
+
+class CustomVoiceReq(BaseModel):
+    voice_id: str
+    name: Optional[str] = None
+
+
+@api_router.post("/voice/custom")
+async def add_custom_voice(req: CustomVoiceReq, user=Depends(get_current_user)):
+    vid = req.voice_id.strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{16,40}", vid):
+        raise HTTPException(status_code=400, detail="That doesn't look like an ElevenLabs Voice ID")
+    name = (req.name or "").strip()[:60]
+    verified = False
+    if ELEVENLABS_API_KEY:
+        try:
+            from elevenlabs.client import ElevenLabs
+            v = ElevenLabs(api_key=ELEVENLABS_API_KEY).voices.get(vid)
+            name = name or v.name
+            verified = True
+        except Exception as e:
+            logger.warning(f"custom voice lookup {vid}: {str(e)[:120]}")
+    entry = {"id": vid, "name": name or f"Custom voice {vid[:6]}"}
+    voices = [c for c in (user.get("custom_voices") or []) if c["id"] != vid] + [entry]
+    await db.users.update_one({"id": user["id"]}, {"$set": {"custom_voices": voices}})
+    return {**entry, "custom": True, "verified": verified}
+
+
+@api_router.delete("/voice/custom/{vid}")
+async def remove_custom_voice(vid: str, user=Depends(get_current_user)):
+    voices = [c for c in (user.get("custom_voices") or []) if c["id"] != vid]
+    await db.users.update_one({"id": user["id"]}, {"$set": {"custom_voices": voices}})
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

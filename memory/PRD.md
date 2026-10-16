@@ -250,3 +250,9 @@ REQUIRED STEPS when ready:
   turns orange, pulses (animate-pulse + orange ring + glow shadow), shows a pinging corner dot
   (testid update-available-dot), label "Update!", tooltip "Update available — N new commit(s)".
   Exposes data-update-available attribute. Verified via route-mock (behind:3 + admin role).
+
+## 2026-06 — Custom ElevenLabs voices
+- Settings → Voice: "Add a voice" form (Voice ID + optional name). Stored per user in users.custom_voices; shown first with "Added" badge + remove button.
+- Endpoints: POST /api/voice/custom, DELETE /api/voice/custom/{id}; GET /api/voice/voices merges custom + account voices.
+- Name auto-fetched from ElevenLabs when key is valid; otherwise placeholder name (preview EL key is invalid → 401).
+- Added in preview for owner: ijUjCmO8mhKposA71yB8, SOYHLrjzK2X1ezoPC6cr.
