@@ -257,3 +257,4 @@ REQUIRED STEPS when ready:
 - Name auto-fetched from ElevenLabs when key is valid; otherwise placeholder name (preview EL key is invalid → 401).
 - Added in preview for owner: ijUjCmO8mhKposA71yB8, SOYHLrjzK2X1ezoPC6cr.
 - Rename: pencil icon on added voices → inline edit (Enter saves, Esc cancels). PATCH /api/voice/custom/{id}. Preview voices renamed: ijUjCm…=Sideous, SOYHLr…=Mick.
+- 2026-06: ElevenLabs key saved & verified in preview (encrypted, db.app_config secrets). TTS (Sideous/Mick), STT (scribe_v1) and voice list confirmed live.
