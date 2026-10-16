@@ -186,6 +186,19 @@ function VoiceTab() {
     } catch { setPreviewing(null); toast.error("Preview failed"); }
   };
 
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState("");
+  const rename = async (id) => {
+    const name = draft.trim();
+    setEditing(null);
+    const old = voices.find((x) => x.id === id);
+    if (!name || name === old?.name) return;
+    try {
+      await api.patch(`/voice/custom/${id}`, { name });
+      setVoices((list) => list.map((x) => (x.id === id ? { ...x, name } : x)));
+      toast.success("Voice renamed");
+    } catch (err) { toast.error(err.response?.data?.detail || "Rename failed"); }
+  };
   const added = (v) => setVoices((list) => [v, ...list.filter((x) => x.id !== v.id)]);
   const remove = async (id, e) => {
     e.stopPropagation();
@@ -201,7 +214,20 @@ function VoiceTab() {
       {voices.map((v) => (
         <div key={v.id} data-testid={`voice-option-${v.id}`} onClick={() => select(v.id)}
           className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${current === v.id ? "border-orange-500/50 bg-orange-500/10" : "border-white/5 bg-[#16161c] hover:border-white/15"}`}>
-          <span className="flex-1 min-w-0 text-sm text-zinc-200 truncate">{v.name}</span>
+          {editing === v.id ? (
+            <input data-testid={`voice-rename-input-${v.id}`} autoFocus value={draft} onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setDraft(e.target.value)} onBlur={() => rename(v.id)}
+              onKeyDown={(e) => { if (e.key === "Enter") rename(v.id); if (e.key === "Escape") setEditing(null); }}
+              className="flex-1 min-w-0 bg-[#0d0d12] border border-orange-500/40 rounded px-2 py-0.5 text-sm text-zinc-200 focus:outline-none" />
+          ) : (
+            <span data-testid={`voice-name-${v.id}`} className="flex-1 min-w-0 text-sm text-zinc-200 truncate">{v.name}</span>
+          )}
+          {v.custom && editing !== v.id && (
+            <button data-testid={`voice-rename-${v.id}`} onClick={(e) => { e.stopPropagation(); setEditing(v.id); setDraft(v.name); }}
+              className="text-zinc-600 hover:text-orange-400" title="Rename">
+              <Pencil size={14} />
+            </button>
+          )}
           {v.custom && <span className="text-[10px] uppercase tracking-wide text-orange-400/80 border border-orange-500/30 rounded px-1.5 py-0.5">Added</span>}
           {v.custom && (
             <button data-testid={`voice-remove-${v.id}`} onClick={(e) => remove(v.id, e)} className="text-zinc-600 hover:text-red-400" title="Remove from list">

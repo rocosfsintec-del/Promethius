@@ -2085,6 +2085,23 @@ async def add_custom_voice(req: CustomVoiceReq, user=Depends(get_current_user)):
     return {**entry, "custom": True, "verified": verified}
 
 
+class RenameVoiceReq(BaseModel):
+    name: str
+
+
+@api_router.patch("/voice/custom/{vid}")
+async def rename_custom_voice(vid: str, req: RenameVoiceReq, user=Depends(get_current_user)):
+    name = req.name.strip()[:60]
+    if not name:
+        raise HTTPException(status_code=400, detail="Name can't be empty")
+    voices = user.get("custom_voices") or []
+    if not any(c["id"] == vid for c in voices):
+        raise HTTPException(status_code=404, detail="Voice not found")
+    voices = [{**c, "name": name} if c["id"] == vid else c for c in voices]
+    await db.users.update_one({"id": user["id"]}, {"$set": {"custom_voices": voices}})
+    return {"id": vid, "name": name, "custom": True}
+
+
 @api_router.delete("/voice/custom/{vid}")
 async def remove_custom_voice(vid: str, user=Depends(get_current_user)):
     voices = [c for c in (user.get("custom_voices") or []) if c["id"] != vid]
